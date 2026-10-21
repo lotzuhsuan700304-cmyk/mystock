@@ -74,9 +74,19 @@ if "portfolio_df" not in st.session_state:
     st.session_state.portfolio_df = pd.DataFrame(DEFAULT_PORTFOLIO)
 
 # ==========================================
-# 3. 側邊欄：現金池、壓力測試與半凱利設定
+# 3. 側邊欄：即時報價、盤前交易與資金設定
 # ==========================================
 with st.sidebar:
+    st.markdown("### 📡 即時行情與盤前交易設定")
+    enable_live_feed = st.toggle("🌐 自動抓取即時行情 (yfinance)", value=True, help="開啟時自動透過 yfinance 抓取即時報價；關閉時保留主表手動改價")
+    include_extended = st.checkbox("🌅 包含盤前/盤後延長交易價格", value=True, help="開啟時在盤前 (台灣 16:00 起) 與盤後優先抓取延長交易撮合價")
+    
+    if st.button("⚡ 立即強制更新即時報價", use_container_width=True):
+        st.cache_data.clear()
+        st.success("已清空行情快取，重新連線最新報價！")
+        st.rerun()
+
+    st.divider()
     st.markdown("### 💰 資金池與帳戶配置")
     cash_pool = st.number_input(
         "可用美元現金池 (USD Cash)",
@@ -91,8 +101,8 @@ with st.sidebar:
         step=100.0,
         help="INTC (-$414.27) + NBIS (-$3,047.25) 稅務抵扣池"
     )
-    st.divider()
 
+    st.divider()
     st.markdown("### 📉 系統性風險壓力測試")
     market_shock = st.slider("大盤漲跌衝擊模擬 (%)", min_value=-30, max_value=20, value=0, step=1)
     beta_mult = st.slider("高 Beta 科技股敏感度倍數", min_value=1.00, max_value=2.50, value=1.50, step=0.05)
@@ -105,18 +115,34 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 4. 行情抓取與量化指標計算引擎 (yfinance)
+# 4. 行情抓取引擎 (支援常規盤與盤前/盤後延長交易)
 # ==========================================
-@st.cache_data(ttl=60)
-def fetch_ticker_quant_metrics(ticker: str):
+@st.cache_data(ttl=30)
+def fetch_ticker_quant_metrics(ticker: str, get_extended: bool = True):
     try:
         tk = yf.Ticker(ticker.strip().upper())
         hist = tk.history(period="1y")
         if hist.empty:
             return None
-        close = float(hist["Close"].iloc[-1])
-        prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else close
-        day_chg_pct = ((close - prev_close) / prev_close) * 100.0
+        
+        reg_close = float(hist["Close"].iloc[-1])
+        prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else reg_close
+
+        # 嘗試抓取盤前/盤後 1 分鐘延長交易最新報價
+        current_price = reg_close
+        market_session = "常規收盤"
+        if get_extended:
+            try:
+                ext_hist = tk.history(period="1d", interval="1m", prepost=True)
+                if not ext_hist.empty:
+                    ext_price = float(ext_hist["Close"].iloc[-1])
+                    if ext_price > 0:
+                        current_price = round(ext_price, 2)
+                        market_session = "即時/盤前盤後"
+            except Exception:
+                pass
+
+        day_chg_pct = ((current_price - prev_close) / prev_close) * 100.0
 
         # 近 6 個月波段高低點
         recent = hist.tail(126)
@@ -136,7 +162,7 @@ def fetch_ticker_quant_metrics(ticker: str):
         high_close = (hist["High"] - hist["Close"].shift()).abs()
         low_close = (hist["Low"] - hist["Close"].shift()).abs()
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        atr_14 = float(tr.rolling(14).mean().iloc[-1]) if len(tr) >= 14 else close * 0.04
+        atr_14 = float(tr.rolling(14).mean().iloc[-1]) if len(tr) >= 14 else reg_close * 0.04
 
         # 14D RSI
         delta = hist["Close"].diff()
@@ -146,13 +172,15 @@ def fetch_ticker_quant_metrics(ticker: str):
         rsi_14 = float((100 - (100 / (1 + rs))).iloc[-1]) if not rs.dropna().empty else 50.0
 
         # 均線系統
-        ma20 = float(hist["Close"].rolling(20).mean().iloc[-1]) if len(hist) >= 20 else close
-        ma50 = float(hist["Close"].rolling(50).mean().iloc[-1]) if len(hist) >= 50 else close
+        ma20 = float(hist["Close"].rolling(20).mean().iloc[-1]) if len(hist) >= 20 else reg_close
+        ma50 = float(hist["Close"].rolling(50).mean().iloc[-1]) if len(hist) >= 50 else reg_close
         ma200 = float(hist["Close"].rolling(200).mean().iloc[-1]) if len(hist) >= 200 else ma50
 
         return {
-            "Price": round(close, 2),
+            "Price": round(current_price, 2),
+            "Reg_Close": round(reg_close, 2),
             "Day_Chg_Pct": round(day_chg_pct, 2),
+            "Session": market_session,
             "Swing_High": round(swing_high, 2),
             "Swing_Low": round(swing_low, 2),
             "Fib_0236": round(fib_0236, 2),
@@ -178,15 +206,28 @@ for idx, row in df_base.iterrows():
     tkr = str(row["Ticker"]).strip().upper()
     if not tkr:
         continue
-    q = fetch_ticker_quant_metrics(tkr)
-    raw_price = q["Price"] if q else float(row["Avg_Cost"])
-    sim_price = round(raw_price * shock_factor, 2)
-    atr_val = q["ATR"] if q else round(sim_price * 0.045, 2)
-    fib382 = q["Fib_0382"] if q else round(sim_price * 1.12, 2)
-    fib618 = q["Fib_0618"] if q else round(sim_price * 1.22, 2)
-    ma20_val = q["MA20"] if q else sim_price
-    ma200_val = q["MA200"] if q else sim_price
+    
+    if enable_live_feed:
+        q = fetch_ticker_quant_metrics(tkr, get_extended=include_extended)
+        raw_price = q["Price"] if q else float(row.get("Avg_Cost", 100.0))
+        atr_val = q["ATR"] if q else round(raw_price * 0.045, 2)
+        fib382 = q["Fib_0382"] if q else round(raw_price * 1.12, 2)
+        fib618 = q["Fib_0618"] if q else round(raw_price * 1.22, 2)
+        ma20_val = q["MA20"] if q else raw_price
+        ma200_val = q["MA200"] if q else raw_price
+        session_label = q["Session"] if q else "自訂"
+        day_chg = q["Day_Chg_Pct"] if q else 0.0
+    else:
+        raw_price = float(row.get("Price", row.get("Avg_Cost", 100.0)))
+        atr_val = round(raw_price * 0.045, 2)
+        fib382 = round(raw_price * 1.12, 2)
+        fib618 = round(raw_price * 1.22, 2)
+        ma20_val = raw_price
+        ma200_val = raw_price
+        session_label = "手動離線"
+        day_chg = 0.0
 
+    sim_price = round(raw_price * shock_factor, 2)
     shares = float(row["Shares"])
     avg_cost = float(row["Avg_Cost"])
     mkt_val = round(shares * sim_price, 2)
@@ -200,6 +241,8 @@ for idx, row in df_base.iterrows():
         "Shares": int(shares),
         "Avg_Cost": round(avg_cost, 3),
         "Price": sim_price,
+        "Session": session_label,
+        "Day_Chg_Pct": day_chg,
         "Market_Value": mkt_val,
         "Total_Cost": cost_val,
         "PnL": pnl,
@@ -241,14 +284,15 @@ excess_shares = np.maximum(df_calc["Shares"] - df_calc["Optimal_Shares"], 0)
 releasable_cash = float((excess_shares * df_calc["Price"]).sum()) + cash_pool
 
 # ==========================================
-# 5. 頂部標題與 5 大核心 KPI 儀表板 (已解耦字串語法)
+# 5. 頂部標題與 5 大核心 KPI 儀表板
 # ==========================================
 st.markdown("## 📊 美股量化風控 × 費波納契 × 半凱利操盤系統")
-st.caption("結合 Python yfinance 自動化行情抓取、費波納契時空共振 (0.382 / 0.618 / 1.272 + 時間轉折窗)、ATR 動態停損與萬用加減碼建倉模型")
+status_feed_txt = "🟢 yfinance 即時/盤前連線中" if enable_live_feed else "🟡 手動改價模式"
+st.caption(f"連線狀態：{status_feed_txt} | 結合費波納契時空共振 (0.382 / 0.618 / 1.272)、ATR 動態停損與萬用加減碼建倉模型")
 
 k1, k2, k3, k4, k5 = st.columns(5)
 with k1:
-    sub_k1 = f"股票: ${total_stock_val:,.0f} | 現金池: ${cash_pool:,.0f}"
+    sub_k1 = f"股票: ${total_stock_val:,.0f} \vert{} 現金池: ${cash_pool:,.0f}"
     st.markdown(f"""
     <div class="kpi-card">
         <div class="kpi-title">股票總市值 + 現金總淨值 (USD)</div>
@@ -289,7 +333,7 @@ with k4:
     """, unsafe_allow_html=True)
 
 with k5:
-    sub_k5 = f"現有美金: ${cash_pool:,.0f} | 可抵稅額: ${realized_loss_tax:,.0f}"
+    sub_k5 = f"現有美金: ${cash_pool:,.0f} \vert{} 可抵稅額: ${realized_loss_tax:,.0f}"
     st.markdown(f"""
     <div class="kpi-card">
         <div class="kpi-title">可動用現金 + 減碼釋出資金池</div>
@@ -330,7 +374,7 @@ for col, (title, dt_str, desc, color, is_hl) in zip(tz_cols, tz_events):
 st.write("")
 
 # ==========================================
-# 7. 四大核心操作分頁 (含 Tab 4 萬用加減碼與新股建倉引擎)
+# 7. 四大核心操作分頁
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs([
     "📋 互動式風控追蹤主表 (可改價/增刪股票)",
@@ -353,7 +397,9 @@ with tab1:
             "Name": st.column_config.TextColumn("名稱"),
             "Shares": st.column_config.NumberColumn("持有股數", min_value=0, step=1),
             "Avg_Cost": st.column_config.NumberColumn("持有均價 ($)", format="$%.3f"),
-            "Price": st.column_config.NumberColumn("即時/模擬價 ($)", format="$%.2f"),
+            "Price": st.column_config.NumberColumn("即時/盤前價 ($)", format="$%.2f"),
+            "Session": st.column_config.TextColumn("時段狀態", disabled=True),
+            "Day_Chg_Pct": st.column_config.NumberColumn("當日漲跌 (%)", format="%.2f%%", disabled=True),
             "Market_Value": st.column_config.NumberColumn("總市值 ($)", format="$%.2f", disabled=True),
             "PnL": st.column_config.NumberColumn("未實現損益 ($)", format="$%.2f", disabled=True),
             "PnL_Pct": st.column_config.NumberColumn("報酬率 (%)", format="%.2f%%", disabled=True),
@@ -403,7 +449,7 @@ with tab3:
     if "NBIS" in df_calc["Ticker"].values:
         nbis_row = df_calc[df_calc["Ticker"] == "NBIS"].iloc[0]
         with col_nbis:
-            st.markdown(f"**🔹 NBIS (現有 {int(nbis_row['Shares'])} 股 | 現價 ${nbis_row['Price']:.2f} | 目標降至 333 股)**")
+            st.markdown(f"**🔹 NBIS (現有 {int(nbis_row['Shares'])} 股 | 即時/盤前價 ${nbis_row['Price']:.2f} | 目標降至 333 股)**")
             nbis_plan = pd.DataFrame([
                 {"階段": "第一階 (0.382 反彈位)", "掛單價 ($)": 195.80, "減碼股數": 87, "預計收回現金 ($)": round(87 * 195.80, 2)},
                 {"階段": "第二階 (前波密集壓力)", "掛單價 ($)": 200.00, "減碼股數": 80, "預計收回現金 ($)": round(80 * 200.00, 2)},
@@ -415,7 +461,7 @@ with tab3:
     if "MRVL" in df_calc["Ticker"].values:
         mrvl_row = df_calc[df_calc["Ticker"] == "MRVL"].iloc[0]
         with col_mrvl:
-            st.markdown(f"**🔸 MRVL (現有 {int(mrvl_row['Shares'])} 股 | 現價 ${mrvl_row['Price']:.2f} | 目標降至 180 股)**")
+            st.markdown(f"**🔸 MRVL (現有 {int(mrvl_row['Shares'])} 股 | 即時/盤前價 ${mrvl_row['Price']:.2f} | 目標降至 180 股)**")
             mrvl_plan = pd.DataFrame([
                 {"階段": "第一階 (0.618 關鍵位 GTC)", "掛單價 ($)": 247.77, "減碼股數": 57, "預計收回現金 ($)": round(57 * 247.77, 2)},
                 {"階段": "第二階 (前高成本區)", "掛單價 ($)": 256.00, "減碼股數": 60, "預計收回現金 ($)": round(60 * 256.00, 2)},
@@ -425,7 +471,7 @@ with tab3:
             st.dataframe(mrvl_plan, use_container_width=True, hide_index=True)
 
 # ------------------------------------------
-# Tab 4: 萬用個股加減碼與新股建倉引擎 (完全除錯版)
+# Tab 4: 萬用個股加減碼與新股建倉引擎
 # ------------------------------------------
 with tab4:
     st.markdown("#### 🚀 萬用個股動態加減碼與新股建倉引擎 (支援現有持股 & 任意新購美股)")
@@ -460,7 +506,7 @@ with tab4:
                 default_kelly_target = default_kelly_cap
 
     # 抓取該標的量化指標
-    q_data = fetch_ticker_quant_metrics(target_ticker)
+    q_data = fetch_ticker_quant_metrics(target_ticker, get_extended=include_extended)
     live_p = q_data["Price"] if q_data else (default_cur_cost if default_cur_cost > 0 else 100.0)
     live_atr = q_data["ATR"] if q_data else round(live_p * 0.04, 2)
     live_ma20 = q_data["MA20"] if q_data else live_p
@@ -493,7 +539,8 @@ with tab4:
     st.markdown("---")
     st.markdown(f"##### 🛡️ `{target_ticker}` 即時行情與三道量化風控守門員檢核")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("即時報價", f"${live_p:.2f}", f"{q_data['Day_Chg_Pct']:+.2f}%" if q_data else "模擬")
+    session_note = f" ({q_data['Session']})" if q_data else ""
+    m1.metric("即時報價", f"${live_p:.2f}", f"{q_data['Day_Chg_Pct']:+.2f}%{session_note}" if q_data else "模擬")
     m2.metric("目前權重 / 凱利上限", f"{cur_weight_pct:.1f}% / {sim_kelly_pct:.1f}%", f"{cur_weight_pct - sim_kelly_pct:+.1f}%", delta_color="inverse")
     m3.metric("凱利建議上限股數", f"{max_kelly_shares} 股", f"現有 {sim_cur_shares} 股")
     m4.metric("20MA / 200MA 均線", f"${live_ma20:.2f}", f"年線 ${live_ma200:.2f}")
@@ -607,8 +654,6 @@ with tab4:
         p_t2 = max(fib_618_lvl, round(live_p + 2.5 * live_atr, 2))
         p_t3 = max(fib_1272_lvl, round(live_p + 4.0 * live_atr, 2))
         p_stop = round(max(swing_low_lvl, live_p - 2.0 * live_atr), 2)
-        
-        # 修正後的乾淨三元運算式
         ref_cost = sim_cur_cost if sim_cur_shares > 0 else buy_p1
 
         df_fib_sell = pd.DataFrame([
