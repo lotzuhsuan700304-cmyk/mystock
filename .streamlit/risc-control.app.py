@@ -292,7 +292,7 @@ st.caption(f"連線狀態：{status_feed_txt} | 結合費波納契時空共振 (
 
 k1, k2, k3, k4, k5 = st.columns(5)
 with k1:
-    sub_k1 = f"股票: ${total_stock_val:,.0f} \vert{} 現金池: ${cash_pool:,.0f}"
+    sub_k1 = f"股票: ${total_stock_val:,.0f} / 現金池: ${cash_pool:,.0f}"
     st.markdown(f"""
     <div class="kpi-card">
         <div class="kpi-title">股票總市值 + 現金總淨值 (USD)</div>
@@ -333,7 +333,7 @@ with k4:
     """, unsafe_allow_html=True)
 
 with k5:
-    sub_k5 = f"現有美金: ${cash_pool:,.0f} \vert{} 可抵稅額: ${realized_loss_tax:,.0f}"
+    sub_k5 = f"現有美金: ${cash_pool:,.0f} / 可抵稅額: ${realized_loss_tax:,.0f}"
     st.markdown(f"""
     <div class="kpi-card">
         <div class="kpi-title">可動用現金 + 減碼釋出資金池</div>
