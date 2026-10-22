@@ -1447,4 +1447,4 @@ def main_with_error_handling(page: ft.Page):
         page.update()
 
 if __name__ == "__main__":
-    ft.run(main_with_error_handling, view=ft.AppView.WEB_BROWSER, port=8550, host="0.0.0.0")
+    ft.app(target=main)

@@ -8,8 +8,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install flet requests
-      - working-directory: ./Android
+      - name: Install dependencies
+        run: pip install flet requests pandas numpy
+      - name: Build APK
+        working-directory: ./Android
         run: yes | flet build apk -v
       - uses: actions/upload-artifact@v4
         with:
