@@ -1,18 +1,24 @@
 import datetime
 import flet as ft
 import requests
+
 class _YFHistory:
     def __init__(self, closes):
         self.empty = len(closes) == 0
         self._closes = closes
         self.Close = self
+
     @property
     def iloc(self):
         return self._closes
+
     def __getitem__(self, k):
         return self if k == "Close" else self._closes[k]
+
     def __len__(self):
         return len(self._closes)
+
+
 class _YFTicker:
     def __init__(self, symbol):
         self.symbol = symbol.strip().upper()
@@ -26,12 +32,24 @@ class _YFTicker:
                 self._closes = [float(x) for x in q if x is not None]
         except Exception:
             pass
-        self.fast_info = {"last_price": self._closes[-1] if self._closes else 0.0, "previous_close": self._closes[-2] if len(self._closes) > 1 else 0.0}
-        self.info = {"regularMarketPrice": self.fast_info["last_price"], "currentPrice": self.fast_info["last_price"], "previousClose": self.fast_info["previous_close"]}
+        self.fast_info = {
+            "last_price": self._closes[-1] if self._closes else 0.0,
+            "previous_close": self._closes[-2] if len(self._closes) > 1 else 0.0,
+        }
+        self.info = {
+            "regularMarketPrice": self.fast_info["last_price"],
+            "currentPrice": self.fast_info["last_price"],
+            "previousClose": self.fast_info["previous_close"],
+        }
+
     def history(self, *args, **kwargs):
         return _YFHistory(self._closes)
+
+
 class _YFModule:
     Ticker = _YFTicker
+
+
 yf = _YFModule()
 
 import pandas as pd
@@ -62,6 +80,7 @@ US_HOLIDAYS_2026 = {
     datetime.date(2026, 12, 25),
 }
 
+
 def add_us_trading_days(start_date: datetime.date, trading_days: int) -> datetime.date:
     """從起始基準日向後推算指定美股交易日數（自動跳過週末與美股休市日）"""
     cur_dt = start_date
@@ -72,20 +91,44 @@ def add_us_trading_days(start_date: datetime.date, trading_days: int) -> datetim
             added += 1
     return cur_dt
 
+
 # ==========================================
-# 2. Flet 1.0 跨版本相容 UI 輔助函數
+# 2. Flet 跨版本相容 UI 輔助函數（已修正 0.85+ 問題）
 # ==========================================
 def safe_border(width: float, color: str):
+    """優先使用新版 ft.Border，失敗再回退舊版"""
     try:
-        return ft.border.all(width, color)
+        return ft.Border.all(width, color)
     except Exception:
         try:
-            return ft.Border.all(width, color)
+            return ft.border.all(width, color)
         except Exception:
             return None
 
-def make_btn(text: str, on_click_fn, bg_color: str = "#2563eb", text_color: str = "#ffffff", expand: bool = False, pad_v: int = 10, pad_h: int = 14, border_col: str = None):
-    """Flet 1.0 原生觸控按鈕"""
+
+def safe_padding(vertical: float = 0, horizontal: float = 0):
+    """優先使用新版 ft.Padding.symmetric，失敗再回退舊版"""
+    try:
+        return ft.Padding.symmetric(vertical=vertical, horizontal=horizontal)
+    except Exception:
+        try:
+            return ft.padding.symmetric(vertical=vertical, horizontal=horizontal)
+        except Exception:
+            # 最後備案：回傳單一數字（Flet 可接受）
+            return max(vertical, horizontal)
+
+
+def make_btn(
+    text: str,
+    on_click_fn,
+    bg_color: str = "#2563eb",
+    text_color: str = "#ffffff",
+    expand: bool = False,
+    pad_v: int = 10,
+    pad_h: int = 14,
+    border_col: str = None,
+):
+    """Flet 原生觸控按鈕（已相容新舊版本）"""
     return ft.Container(
         content=ft.Row(
             [ft.Text(text, color=text_color, size=13, weight=ft.FontWeight.BOLD)],
@@ -94,10 +137,11 @@ def make_btn(text: str, on_click_fn, bg_color: str = "#2563eb", text_color: str 
         bgcolor=bg_color,
         border=safe_border(1.5, border_col) if border_col else None,
         border_radius=8,
-        padding=ft.padding.all(vertical=pad_v, horizontal=pad_h) if hasattr(ft, "padding") else 10,
+        padding=safe_padding(vertical=pad_v, horizontal=pad_h),
         on_click=on_click_fn,
         expand=expand,
     )
+
 
 def make_table_box(title: str, headers: list, rows: list, border_color: str = "#2d3748"):
     """高質感原生資料表渲染器"""
@@ -105,7 +149,8 @@ def make_table_box(title: str, headers: list, rows: list, border_color: str = "#
         ft.Container(
             content=ft.Text(h, size=12, weight=ft.FontWeight.BOLD, color="#90cdf4"),
             expand=True,
-        ) for h in headers
+        )
+        for h in headers
     ]
     table_rows = [
         ft.Container(
@@ -120,7 +165,8 @@ def make_table_box(title: str, headers: list, rows: list, border_color: str = "#
             ft.Container(
                 content=ft.Text(str(c), size=12, color="#e2e8f0"),
                 expand=True,
-            ) for c in r
+            )
+            for c in r
         ]
         table_rows.append(
             ft.Container(
@@ -135,16 +181,21 @@ def make_table_box(title: str, headers: list, rows: list, border_color: str = "#
         border=safe_border(1, border_color),
         border_radius=12,
         padding=14,
-        content=ft.Column([
-            ft.Text(title, size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
-            ft.Column(table_rows, spacing=4),
-        ], spacing=8)
+        content=ft.Column(
+            [
+                ft.Text(title, size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
+                ft.Column(table_rows, spacing=4),
+            ],
+            spacing=8,
+        ),
     )
 
+
 # ==========================================
-# 3. 即時行情與量化指標計算引擎 (支援常規盤 + 盤前/盤後)
+# 3. 即時行情與量化指標計算引擎
 # ==========================================
 QUOTE_CACHE = {}
+
 
 def fetch_quant_metrics(ticker: str, get_extended: bool = True, force_refresh: bool = False):
     tkr = ticker.strip().upper()
@@ -224,6 +275,7 @@ def fetch_quant_metrics(ticker: str, get_extended: bool = True, force_refresh: b
     except Exception:
         return None
 
+
 # ==========================================
 # 4. Flet 旗艦級操盤系統主視窗
 # ==========================================
@@ -270,7 +322,7 @@ def main(page: ft.Page):
     t4_result_col = ft.Column(spacing=12)
 
     # ------------------------------------------
-    # 建構「⏱️ 費波納契時間週期變盤視窗 (支援自選起始日 T+0)」
+    # 建構「⏱️ 費波納契時間週期變盤視窗」
     # ------------------------------------------
     def parse_anchor_date() -> datetime.date:
         raw_str = tf_anchor_date.value.strip().replace("/", "-")
@@ -327,11 +379,14 @@ def main(page: ft.Page):
                 border=safe_border(1.5 if is_hl else 1.0, border_c),
                 border_radius=10,
                 padding=12,
-                content=ft.Column([
-                    ft.Text(f"{title} ({day_badge})", color=color, size=12, weight=ft.FontWeight.BOLD),
-                    ft.Text(dt_str, color="#ffffff", size=18, weight=ft.FontWeight.BOLD),
-                    ft.Text(desc, color="#a0aec0", size=11),
-                ], spacing=4)
+                content=ft.Column(
+                    [
+                        ft.Text(f"{title} ({day_badge})", color=color, size=12, weight=ft.FontWeight.BOLD),
+                        ft.Text(dt_str, color="#ffffff", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Text(desc, color="#a0aec0", size=11),
+                    ],
+                    spacing=4,
+                ),
             )
             tz_row_container.controls.append(tz_card)
 
@@ -340,7 +395,6 @@ def main(page: ft.Page):
         render_time_zones()
         page.update()
 
-    # 嘗試掛載 Flet 原生 DatePicker (若環境支援則可彈出日曆選取)
     def open_native_datepicker(e):
         try:
             def on_date_picked(ev):
@@ -426,27 +480,29 @@ def main(page: ft.Page):
             pnl = round(mkt_val - cost_val, 2)
             pnl_pct = round((pnl / cost_val) * 100.0, 2) if cost_val > 0 else 0.0
 
-            live_rows.append({
-                "Ticker": tkr,
-                "Name": item.get("Name", tkr),
-                "Shares": shares,
-                "Avg_Cost": round(avg_cost, 3),
-                "Price": sim_price,
-                "Session": sess_lbl,
-                "Day_Chg_Pct": day_chg,
-                "Market_Value": mkt_val,
-                "Total_Cost": cost_val,
-                "PnL": pnl,
-                "PnL_Pct": pnl_pct,
-                "ATR": atr_val,
-                "MA20": ma20_val,
-                "MA200": ma200_val,
-                "Fib_0382": fib382,
-                "Fib_0618": fib618,
-                "Key_Fib_Target": float(item.get("Key_Fib_Target", fib382)),
-                "Hard_Stop": float(item.get("Hard_Stop", round(sim_price - 2 * atr_val, 2))),
-                "Target_Kelly_Pct": float(item.get("Target_Kelly_Pct", 15.0)),
-            })
+            live_rows.append(
+                {
+                    "Ticker": tkr,
+                    "Name": item.get("Name", tkr),
+                    "Shares": shares,
+                    "Avg_Cost": round(avg_cost, 3),
+                    "Price": sim_price,
+                    "Session": sess_lbl,
+                    "Day_Chg_Pct": day_chg,
+                    "Market_Value": mkt_val,
+                    "Total_Cost": cost_val,
+                    "PnL": pnl,
+                    "PnL_Pct": pnl_pct,
+                    "ATR": atr_val,
+                    "MA20": ma20_val,
+                    "MA200": ma200_val,
+                    "Fib_0382": fib382,
+                    "Fib_0618": fib618,
+                    "Key_Fib_Target": float(item.get("Key_Fib_Target", fib382)),
+                    "Hard_Stop": float(item.get("Hard_Stop", round(sim_price - 2 * atr_val, 2))),
+                    "Target_Kelly_Pct": float(item.get("Target_Kelly_Pct", 15.0)),
+                }
+            )
 
         total_stock_val = sum(r["Market_Value"] for r in live_rows)
         total_portfolio_equity = total_stock_val + cash_pool
@@ -501,11 +557,14 @@ def main(page: ft.Page):
                     border=safe_border(1, "#2d3748"),
                     border_radius=12,
                     padding=14,
-                    content=ft.Column([
-                        ft.Text(k_title, color="#a0aec0", size=12),
-                        ft.Text(k_val, color=k_col, size=22, weight=ft.FontWeight.BOLD),
-                        ft.Text(k_sub, color="#718096", size=11),
-                    ], spacing=4)
+                    content=ft.Column(
+                        [
+                            ft.Text(k_title, color="#a0aec0", size=12),
+                            ft.Text(k_val, color=k_col, size=22, weight=ft.FontWeight.BOLD),
+                            ft.Text(k_sub, color="#718096", size=11),
+                        ],
+                        spacing=4,
+                    ),
                 )
             )
 
@@ -522,32 +581,38 @@ def main(page: ft.Page):
         page.update()
 
     # ------------------------------------------
-    # Tab 1: 📋 互動式風控追蹤主表 (可改價/增刪股票)
+    # Tab 1: 📋 互動式風控追蹤主表
     # ------------------------------------------
     def build_tab1(live_rows: list):
         tab1_col.controls.clear()
         tab1_col.controls.append(
-            ft.Text("💡 可直接於下方修改各股「持有股數」、「持有均價」、「半凱利上限」、「費氏目標」與「防守底線」，或於底部直接新增/刪除股票：", size=13, color="#90cdf4")
+            ft.Text(
+                "💡 可直接於下方修改各股「持有股數」、「持有均價」、「半凱利上限」、「費氏目標」與「防守底線」，或於底部直接新增/刪除股票：",
+                size=13,
+                color="#90cdf4",
+            )
         )
 
         summary_headers = ["代號", "股數", "均價($)", "即時/盤前價", "總市值($)", "未實現損益", "目前權重", "凱利上限", "建議加減碼", "費氏目標", "硬性停損", "機械化指令"]
         summary_table_rows = []
         for r in live_rows:
             diff_str = f"{r['Share_Diff']:+d} 股"
-            summary_table_rows.append([
-                r["Ticker"],
-                r["Shares"],
-                f"${r['Avg_Cost']:.2f}",
-                f"${r['Price']:.2f} ({r['Day_Chg_Pct']:+.1f}%)",
-                f"${r['Market_Value']:,.0f}",
-                f"${r['PnL']:,.0f} ({r['PnL_Pct']:+.1f}%)",
-                f"{r['Weight_Pct']:.1f}%",
-                f"{r['Target_Kelly_Pct']:.1f}% ({r['Optimal_Shares']}股)",
-                diff_str,
-                f"${r['Key_Fib_Target']:.2f}",
-                f"${r['Hard_Stop']:.2f}",
-                r["Action_Signal"],
-            ])
+            summary_table_rows.append(
+                [
+                    r["Ticker"],
+                    r["Shares"],
+                    f"${r['Avg_Cost']:.2f}",
+                    f"${r['Price']:.2f} ({r['Day_Chg_Pct']:+.1f}%)",
+                    f"${r['Market_Value']:,.0f}",
+                    f"${r['PnL']:,.0f} ({r['PnL_Pct']:+.1f}%)",
+                    f"{r['Weight_Pct']:.1f}%",
+                    f"{r['Target_Kelly_Pct']:.1f}% ({r['Optimal_Shares']}股)",
+                    diff_str,
+                    f"${r['Key_Fib_Target']:.2f}",
+                    f"${r['Hard_Stop']:.2f}",
+                    r["Action_Signal"],
+                ]
+            )
         tab1_col.controls.append(make_table_box("📋 互動式風控追蹤總表", summary_headers, summary_table_rows, "#3182ce"))
 
         edit_cards = []
@@ -571,6 +636,7 @@ def main(page: ft.Page):
                     except Exception:
                         pass
                     refresh_all(force_api=False)
+
                 return _save
 
             def make_del_fn(i):
@@ -578,6 +644,7 @@ def main(page: ft.Page):
                     if 0 <= i < len(portfolio_data):
                         portfolio_data.pop(i)
                         refresh_all(force_api=False)
+
                 return _del
 
             pnl_c = "#48bb78" if r["PnL"] >= 0 else "#f56565"
@@ -587,17 +654,43 @@ def main(page: ft.Page):
                     border=safe_border(1, "#2d3748"),
                     border_radius=10,
                     padding=12,
-                    content=ft.Column([
-                        ft.Row([
-                            ft.Text(f"🔹 {r['Ticker']} ({r['Name']}) | 現價 ${r['Price']:.2f} [{r['Session']}] | {r['Action_Signal']}", size=14, weight=ft.FontWeight.BOLD, color="#ffffff", expand=True),
-                            ft.Text(f"損益: ${r['PnL']:,.2f} ({r['PnL_Pct']:+.2f}%) | 權重: {r['Weight_Pct']:.2f}% (建議 {r['Share_Diff']:+d} 股)", size=13, weight=ft.FontWeight.BOLD, color=pnl_c),
-                        ], wrap=True),
-                        ft.Row([
-                            tf_s, tf_c, tf_p, tf_k, tf_f, tf_h,
-                            make_btn("💾 儲存修改", make_save_fn(idx, tf_s, tf_c, tf_p, tf_k, tf_f, tf_h), "#2563eb"),
-                            make_btn("🗑️ 刪除", make_del_fn(idx), "#9b2c2c"),
-                        ], wrap=True, spacing=8)
-                    ], spacing=8)
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text(
+                                        f"🔹 {r['Ticker']} ({r['Name']}) | 現價 ${r['Price']:.2f} [{r['Session']}] | {r['Action_Signal']}",
+                                        size=14,
+                                        weight=ft.FontWeight.BOLD,
+                                        color="#ffffff",
+                                        expand=True,
+                                    ),
+                                    ft.Text(
+                                        f"損益: ${r['PnL']:,.2f} ({r['PnL_Pct']:+.2f}%) | 權重: {r['Weight_Pct']:.2f}% (建議 {r['Share_Diff']:+d} 股)",
+                                        size=13,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=pnl_c,
+                                    ),
+                                ],
+                                wrap=True,
+                            ),
+                            ft.Row(
+                                [
+                                    tf_s,
+                                    tf_c,
+                                    tf_p,
+                                    tf_k,
+                                    tf_f,
+                                    tf_h,
+                                    make_btn("💾 儲存修改", make_save_fn(idx, tf_s, tf_c, tf_p, tf_k, tf_f, tf_h), "#2563eb"),
+                                    make_btn("🗑️ 刪除", make_del_fn(idx), "#9b2c2c"),
+                                ],
+                                wrap=True,
+                                spacing=8,
+                            ),
+                        ],
+                        spacing=8,
+                    ),
                 )
             )
 
@@ -617,15 +710,17 @@ def main(page: ft.Page):
             def_p = q_new["Price"] if q_new else float(new_cost_tf.value or 100.0)
             def_atr = q_new["ATR"] if q_new else round(def_p * 0.04, 2)
             def_fib = q_new["Fib_0618"] if q_new else round(def_p * 1.15, 2)
-            portfolio_data.append({
-                "Ticker": nt,
-                "Name": nt,
-                "Shares": int(float(new_sh_tf.value or 0)),
-                "Avg_Cost": float(new_cost_tf.value or def_p),
-                "Target_Kelly_Pct": float(new_kelly_tf.value or 15.0),
-                "Hard_Stop": round(def_p - 2.0 * def_atr, 2),
-                "Key_Fib_Target": def_fib,
-            })
+            portfolio_data.append(
+                {
+                    "Ticker": nt,
+                    "Name": nt,
+                    "Shares": int(float(new_sh_tf.value or 0)),
+                    "Avg_Cost": float(new_cost_tf.value or def_p),
+                    "Target_Kelly_Pct": float(new_kelly_tf.value or 15.0),
+                    "Hard_Stop": round(def_p - 2.0 * def_atr, 2),
+                    "Key_Fib_Target": def_fib,
+                }
+            )
             refresh_all(force_api=False)
 
         tab1_col.controls.append(
@@ -634,10 +729,17 @@ def main(page: ft.Page):
                 border=safe_border(1.5, "#3182ce"),
                 border_radius=10,
                 padding=14,
-                content=ft.Column([
-                    ft.Text("➕ 直接新增美股代號至風控追蹤主表", size=14, weight=ft.FontWeight.BOLD, color="#63b3ed"),
-                    ft.Row([new_tkr_tf, new_sh_tf, new_cost_tf, new_kelly_tf, make_btn("➕ 加入主表追蹤", add_new_stock, "#38a169")], wrap=True, spacing=10)
-                ], spacing=8)
+                content=ft.Column(
+                    [
+                        ft.Text("➕ 直接新增美股代號至風控追蹤主表", size=14, weight=ft.FontWeight.BOLD, color="#63b3ed"),
+                        ft.Row(
+                            [new_tkr_tf, new_sh_tf, new_cost_tf, new_kelly_tf, make_btn("➕ 加入主表追蹤", add_new_stock, "#38a169")],
+                            wrap=True,
+                            spacing=10,
+                        ),
+                    ],
+                    spacing=8,
+                ),
             )
         )
 
@@ -660,14 +762,19 @@ def main(page: ft.Page):
                     bgcolor="#1e2536",
                     border_radius=8,
                     padding=10,
-                    content=ft.Column([
-                        ft.Row([
-                            ft.Text(f"{r['Ticker']} 實際權重: {w_pct:.2f}%", size=13, weight=ft.FontWeight.BOLD, color=w_color, expand=True),
-                            ft.Text(f"半凱利安全上限: {k_pct:.1f}% (建議 {r['Optimal_Shares']} 股 / 現有 {r['Shares']} 股)", size=12, color="#a0aec0"),
-                        ]),
-                        ft.ProgressBar(value=min(w_pct / 40.0, 1.0), color=w_color, bgcolor="#0e1117"),
-                        ft.ProgressBar(value=min(k_pct / 40.0, 1.0), color="#48bb78", bgcolor="#0e1117"),
-                    ], spacing=5)
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text(f"{r['Ticker']} 實際權重: {w_pct:.2f}%", size=13, weight=ft.FontWeight.BOLD, color=w_color, expand=True),
+                                    ft.Text(f"半凱利安全上限: {k_pct:.1f}% (建議 {r['Optimal_Shares']} 股 / 現有 {r['Shares']} 股)", size=12, color="#a0aec0"),
+                                ]
+                            ),
+                            ft.ProgressBar(value=min(w_pct / 40.0, 1.0), color=w_color, bgcolor="#0e1117"),
+                            ft.ProgressBar(value=min(k_pct / 40.0, 1.0), color="#48bb78", bgcolor="#0e1117"),
+                        ],
+                        spacing=5,
+                    ),
                 )
             )
 
@@ -682,55 +789,97 @@ def main(page: ft.Page):
                     bgcolor="#1e2536",
                     border_radius=8,
                     padding=10,
-                    content=ft.Column([
-                        ft.Text(f"📊 {r['Ticker']} 關鍵防守與費波納契目標位階對照", size=13, weight=ft.FontWeight.BOLD, color="#ffffff"),
-                        ft.Row([
-                            ft.Container(
-                                bgcolor="#742a2a", border_radius=6, padding=8, expand=True,
-                                content=ft.Column([
-                                    ft.Text("🛡️ 硬性防守底線", size=11, color="#feb2b2"),
-                                    ft.Text(f"${stop_p:.2f}", size=15, weight=ft.FontWeight.BOLD, color="#fc8181"),
-                                    ft.Text(f"緩衝: {dist_to_stop:+.1f}%", size=11, color="#fbd38d"),
-                                ], spacing=2)
+                    content=ft.Column(
+                        [
+                            ft.Text(f"📊 {r['Ticker']} 關鍵防守與費波納契目標位階對照", size=13, weight=ft.FontWeight.BOLD, color="#ffffff"),
+                            ft.Row(
+                                [
+                                    ft.Container(
+                                        bgcolor="#742a2a",
+                                        border_radius=6,
+                                        padding=8,
+                                        expand=True,
+                                        content=ft.Column(
+                                            [
+                                                ft.Text("🛡️ 硬性防守底線", size=11, color="#feb2b2"),
+                                                ft.Text(f"${stop_p:.2f}", size=15, weight=ft.FontWeight.BOLD, color="#fc8181"),
+                                                ft.Text(f"緩衝: {dist_to_stop:+.1f}%", size=11, color="#fbd38d"),
+                                            ],
+                                            spacing=2,
+                                        ),
+                                    ),
+                                    ft.Container(
+                                        bgcolor="#1a365d",
+                                        border_radius=6,
+                                        padding=8,
+                                        expand=True,
+                                        content=ft.Column(
+                                            [
+                                                ft.Text("⚡ 目前即時現價", size=11, color="#bee3f8"),
+                                                ft.Text(f"${cur_p:.2f}", size=15, weight=ft.FontWeight.BOLD, color="#63b3ed"),
+                                                ft.Text(f"20MA: ${r['MA20']:.2f}", size=11, color="#90cdf4"),
+                                            ],
+                                            spacing=2,
+                                        ),
+                                    ),
+                                    ft.Container(
+                                        bgcolor="#22543d",
+                                        border_radius=6,
+                                        padding=8,
+                                        expand=True,
+                                        content=ft.Column(
+                                            [
+                                                ft.Text("🎯 費氏減碼/停利目標", size=11, color="#c6f6d5"),
+                                                ft.Text(f"${fib_p:.2f}", size=15, weight=ft.FontWeight.BOLD, color="#68d391"),
+                                                ft.Text(f"潛在空間: {dist_to_fib:+.1f}%", size=11, color="#9ae6b4"),
+                                            ],
+                                            spacing=2,
+                                        ),
+                                    ),
+                                ],
+                                spacing=8,
                             ),
-                            ft.Container(
-                                bgcolor="#1a365d", border_radius=6, padding=8, expand=True,
-                                content=ft.Column([
-                                    ft.Text("⚡ 目前即時現價", size=11, color="#bee3f8"),
-                                    ft.Text(f"${cur_p:.2f}", size=15, weight=ft.FontWeight.BOLD, color="#63b3ed"),
-                                    ft.Text(f"20MA: ${r['MA20']:.2f}", size=11, color="#90cdf4"),
-                                ], spacing=2)
-                            ),
-                            ft.Container(
-                                bgcolor="#22543d", border_radius=6, padding=8, expand=True,
-                                content=ft.Column([
-                                    ft.Text("🎯 費氏減碼/停利目標", size=11, color="#c6f6d5"),
-                                    ft.Text(f"${fib_p:.2f}", size=15, weight=ft.FontWeight.BOLD, color="#68d391"),
-                                    ft.Text(f"潛在空間: {dist_to_fib:+.1f}%", size=11, color="#9ae6b4"),
-                                ], spacing=2)
-                            ),
-                        ], spacing=8)
-                    ], spacing=6)
+                        ],
+                        spacing=6,
+                    ),
                 )
             )
 
         tab2_col.controls.append(
-            ft.Row([
-                ft.Container(
-                    bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=12, padding=14, expand=True,
-                    content=ft.Column([
-                        ft.Text("📈 目前持股權重 vs. 半凱利安全上限 (%) [紅線=超配 / 綠線=安全上限]", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
-                        ft.Column(weight_bars, spacing=8),
-                    ], spacing=10)
-                ),
-                ft.Container(
-                    bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=12, padding=14, expand=True,
-                    content=ft.Column([
-                        ft.Text("🪜 各股現價與關鍵防守 / 費氏目標位階階梯圖", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
-                        ft.Column(price_ladders, spacing=8),
-                    ], spacing=10)
-                ),
-            ], wrap=True, spacing=12)
+            ft.Row(
+                [
+                    ft.Container(
+                        bgcolor="#161b26",
+                        border=safe_border(1, "#2d3748"),
+                        border_radius=12,
+                        padding=14,
+                        expand=True,
+                        content=ft.Column(
+                            [
+                                ft.Text("📈 目前持股權重 vs. 半凱利安全上限 (%) [紅線=超配 / 綠線=安全上限]", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
+                                ft.Column(weight_bars, spacing=8),
+                            ],
+                            spacing=10,
+                        ),
+                    ),
+                    ft.Container(
+                        bgcolor="#161b26",
+                        border=safe_border(1, "#2d3748"),
+                        border_radius=12,
+                        padding=14,
+                        expand=True,
+                        content=ft.Column(
+                            [
+                                ft.Text("🪜 各股現價與關鍵防守 / 費氏目標位階階梯圖", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
+                                ft.Column(price_ladders, spacing=8),
+                            ],
+                            spacing=10,
+                        ),
+                    ),
+                ],
+                wrap=True,
+                spacing=12,
+            )
         )
 
     # ------------------------------------------
@@ -738,7 +887,9 @@ def main(page: ft.Page):
     # ------------------------------------------
     def build_tab3(live_rows: list):
         tab3_col.controls.clear()
-        tab3_col.controls.append(ft.Text("🧮 核心超配雙雄 (NBIS & MRVL) 專屬三階梯減碼回收現金試算", size=16, weight=ft.FontWeight.BOLD, color="#f7fafc"))
+        tab3_col.controls.append(
+            ft.Text("🧮 核心超配雙雄 (NBIS & MRVL) 專屬三階梯減碼回收現金試算", size=16, weight=ft.FontWeight.BOLD, color="#f7fafc")
+        )
 
         nbis_r = next((x for x in live_rows if x["Ticker"] == "NBIS"), None)
         mrvl_r = next((x for x in live_rows if x["Ticker"] == "MRVL"), None)
@@ -765,16 +916,30 @@ def main(page: ft.Page):
         ]
 
         tab3_col.controls.append(
-            ft.Row([
-                ft.Container(
-                    expand=True,
-                    content=make_table_box(f"🔹 NBIS (現有 {nbis_sh} 股 | 現價 ${nbis_p:.2f} | 目標降至 333 股)", nbis_headers, nbis_rows, "#3182ce")
-                ),
-                ft.Container(
-                    expand=True,
-                    content=make_table_box(f"🔸 MRVL (現有 {mrvl_sh} 股 | 現價 ${mrvl_p:.2f} | 目標降至 180 股)", mrvl_headers, mrvl_rows, "#ecc94b")
-                ),
-            ], wrap=True, spacing=12)
+            ft.Row(
+                [
+                    ft.Container(
+                        expand=True,
+                        content=make_table_box(
+                            f"🔹 NBIS (現有 {nbis_sh} 股 | 現價 ${nbis_p:.2f} | 目標降至 333 股)",
+                            nbis_headers,
+                            nbis_rows,
+                            "#3182ce",
+                        ),
+                    ),
+                    ft.Container(
+                        expand=True,
+                        content=make_table_box(
+                            f"🔸 MRVL (現有 {mrvl_sh} 股 | 現價 ${mrvl_p:.2f} | 目標降至 180 股)",
+                            mrvl_headers,
+                            mrvl_rows,
+                            "#ecc94b",
+                        ),
+                    ),
+                ],
+                wrap=True,
+                spacing=12,
+            )
         )
 
     # ------------------------------------------
@@ -792,8 +957,12 @@ def main(page: ft.Page):
                     t4_cost_tf.value = str(row_data["Avg_Cost"])
                     t4_kelly_tf.value = str(row_data["Target_Kelly_Pct"])
                     run_tab4_engine()
+
                 return _sel
-            chip_buttons.append(make_btn(f"既有: {r['Ticker']}", make_chip_fn(r), "#1e293b", "#90cdf4", pad_v=6, pad_h=10, border_col="#3182ce"))
+
+            chip_buttons.append(
+                make_btn(f"既有: {r['Ticker']}", make_chip_fn(r), "#1e293b", "#90cdf4", pad_v=6, pad_h=10, border_col="#3182ce")
+            )
 
         for new_sym in ["PLD", "COHR", "RMBS", "AAOI", "NVDA"]:
             def make_new_chip_fn(sym):
@@ -803,8 +972,12 @@ def main(page: ft.Page):
                     t4_cost_tf.value = "0.0"
                     t4_kelly_tf.value = "15.0"
                     run_tab4_engine()
+
                 return _sel_new
-            chip_buttons.append(make_btn(f"➕ 新股: {new_sym}", make_new_chip_fn(new_sym), "#152238", "#68d391", pad_v=6, pad_h=10, border_col="#2f855a"))
+
+            chip_buttons.append(
+                make_btn(f"➕ 新股: {new_sym}", make_new_chip_fn(new_sym), "#152238", "#68d391", pad_v=6, pad_h=10, border_col="#2f855a")
+            )
 
         def run_tab4_engine(e=None):
             t4_result_col.controls.clear()
@@ -853,20 +1026,102 @@ def main(page: ft.Page):
 
             sess_note = q_data["Session"] if q_data else "模擬"
             chg_note = f"{q_data['Day_Chg_Pct']:+.2f}% ({sess_note})" if q_data else "手動"
-            metrics_row = ft.Row([
-                ft.Container(bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=8, padding=10, width=185,
-                             content=ft.Column([ft.Text("即時報價", size=11, color="#a0aec0"), ft.Text(f"${live_p:.2f}", size=18, weight=ft.FontWeight.BOLD), ft.Text(chg_note, size=11, color="#63b3ed")], spacing=2)),
-                ft.Container(bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=8, padding=10, width=185,
-                             content=ft.Column([ft.Text("目前權重 / 凱利上限", size=11, color="#a0aec0"), ft.Text(f"{cur_weight_pct:.1f}% / {sim_kelly_pct:.1f}%", size=18, weight=ft.FontWeight.BOLD), ft.Text(f"差距: {cur_weight_pct - sim_kelly_pct:+.1f}%", size=11, color="#ecc94b")], spacing=2)),
-                ft.Container(bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=8, padding=10, width=185,
-                             content=ft.Column([ft.Text("凱利建議上限股數", size=11, color="#a0aec0"), ft.Text(f"{max_kelly_shares} 股", size=18, weight=ft.FontWeight.BOLD), ft.Text(f"現有 {sim_cur_shares} 股", size=11, color="#a0aec0")], spacing=2)),
-                ft.Container(bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=8, padding=10, width=185,
-                             content=ft.Column([ft.Text("20MA / 200MA 均線", size=11, color="#a0aec0"), ft.Text(f"${live_ma20:.2f}", size=18, weight=ft.FontWeight.BOLD), ft.Text(f"年線 ${live_ma200:.2f}", size=11, color="#a0aec0")], spacing=2)),
-                ft.Container(bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=8, padding=10, width=185,
-                             content=ft.Column([ft.Text("14日 ATR 波動值", size=11, color="#a0aec0"), ft.Text(f"${live_atr:.2f}", size=18, weight=ft.FontWeight.BOLD), ft.Text(f"2ATR停損寬度 ${live_atr*2:.2f}", size=11, color="#fc8181")], spacing=2)),
-                ft.Container(bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=8, padding=10, width=185,
-                             content=ft.Column([ft.Text("14日 RSI 強弱指標", size=11, color="#a0aec0"), ft.Text(f"{live_rsi:.1f}", size=18, weight=ft.FontWeight.BOLD), ft.Text("超買 >70 / 超賣 <30", size=11, color="#a0aec0")], spacing=2)),
-            ], wrap=True, spacing=8)
+            metrics_row = ft.Row(
+                [
+                    ft.Container(
+                        bgcolor="#161b26",
+                        border=safe_border(1, "#2d3748"),
+                        border_radius=8,
+                        padding=10,
+                        width=185,
+                        content=ft.Column(
+                            [
+                                ft.Text("即時報價", size=11, color="#a0aec0"),
+                                ft.Text(f"${live_p:.2f}", size=18, weight=ft.FontWeight.BOLD),
+                                ft.Text(chg_note, size=11, color="#63b3ed"),
+                            ],
+                            spacing=2,
+                        ),
+                    ),
+                    ft.Container(
+                        bgcolor="#161b26",
+                        border=safe_border(1, "#2d3748"),
+                        border_radius=8,
+                        padding=10,
+                        width=185,
+                        content=ft.Column(
+                            [
+                                ft.Text("目前權重 / 凱利上限", size=11, color="#a0aec0"),
+                                ft.Text(f"{cur_weight_pct:.1f}% / {sim_kelly_pct:.1f}%", size=18, weight=ft.FontWeight.BOLD),
+                                ft.Text(f"差距: {cur_weight_pct - sim_kelly_pct:+.1f}%", size=11, color="#ecc94b"),
+                            ],
+                            spacing=2,
+                        ),
+                    ),
+                    ft.Container(
+                        bgcolor="#161b26",
+                        border=safe_border(1, "#2d3748"),
+                        border_radius=8,
+                        padding=10,
+                        width=185,
+                        content=ft.Column(
+                            [
+                                ft.Text("凱利建議上限股數", size=11, color="#a0aec0"),
+                                ft.Text(f"{max_kelly_shares} 股", size=18, weight=ft.FontWeight.BOLD),
+                                ft.Text(f"現有 {sim_cur_shares} 股", size=11, color="#a0aec0"),
+                            ],
+                            spacing=2,
+                        ),
+                    ),
+                    ft.Container(
+                        bgcolor="#161b26",
+                        border=safe_border(1, "#2d3748"),
+                        border_radius=8,
+                        padding=10,
+                        width=185,
+                        content=ft.Column(
+                            [
+                                ft.Text("20MA / 200MA 均線", size=11, color="#a0aec0"),
+                                ft.Text(f"${live_ma20:.2f}", size=18, weight=ft.FontWeight.BOLD),
+                                ft.Text(f"年線 ${live_ma200:.2f}", size=11, color="#a0aec0"),
+                            ],
+                            spacing=2,
+                        ),
+                    ),
+                    ft.Container(
+                        bgcolor="#161b26",
+                        border=safe_border(1, "#2d3748"),
+                        border_radius=8,
+                        padding=10,
+                        width=185,
+                        content=ft.Column(
+                            [
+                                ft.Text("14日 ATR 波動值", size=11, color="#a0aec0"),
+                                ft.Text(f"${live_atr:.2f}", size=18, weight=ft.FontWeight.BOLD),
+                                ft.Text(f"2ATR停損寬度 ${live_atr*2:.2f}", size=11, color="#fc8181"),
+                            ],
+                            spacing=2,
+                        ),
+                    ),
+                    ft.Container(
+                        bgcolor="#161b26",
+                        border=safe_border(1, "#2d3748"),
+                        border_radius=8,
+                        padding=10,
+                        width=185,
+                        content=ft.Column(
+                            [
+                                ft.Text("14日 RSI 強弱指標", size=11, color="#a0aec0"),
+                                ft.Text(f"{live_rsi:.1f}", size=18, weight=ft.FontWeight.BOLD),
+                                ft.Text("超買 >70 / 超賣 <30", size=11, color="#a0aec0"),
+                            ],
+                            spacing=2,
+                        ),
+                    ),
+                ],
+                wrap=True,
+                spacing=8,
+            )
             t4_result_col.controls.append(metrics_row)
 
             is_weight_ok = cur_weight_pct < sim_kelly_pct
@@ -874,22 +1129,47 @@ def main(page: ft.Page):
 
             if not is_weight_ok:
                 gate_banner = ft.Container(
-                    bgcolor="#2d1215", border=safe_border(1.5, "#ef4444"), border_radius=10, padding=12,
-                    content=ft.Column([
-                        ft.Text("🚫 【風控守門員攔截：權重超標，禁止向下攤平加碼】", size=14, weight=ft.FontWeight.BOLD, color="#fc8181"),
-                        ft.Text(f"• 原因：{target_ticker} 目前佔總資產 {cur_weight_pct:.2f}%（持有 {sim_cur_shares} 股），已超過半凱利安全上限 {sim_kelly_pct:.1f}%（上限 {max_kelly_shares} 股）。", size=12, color="#feb2b2"),
-                        ft.Text(f"• 機械化指令：在股數透過右側反彈減碼降至 {max_kelly_shares} 股以下之前，嚴格凍結加碼！請直接執行下方右側「📉 方案 B：三階梯分批減碼方案」（需減碼 {excess_trim_shares} 股）。", size=12, color="#ffffff", weight=ft.FontWeight.BOLD),
-                    ], spacing=4)
+                    bgcolor="#2d1215",
+                    border=safe_border(1.5, "#ef4444"),
+                    border_radius=10,
+                    padding=12,
+                    content=ft.Column(
+                        [
+                            ft.Text("🚫 【風控守門員攔截：權重超標，禁止向下攤平加碼】", size=14, weight=ft.FontWeight.BOLD, color="#fc8181"),
+                            ft.Text(
+                                f"• 原因：{target_ticker} 目前佔總資產 {cur_weight_pct:.2f}%（持有 {sim_cur_shares} 股），已超過半凱利安全上限 {sim_kelly_pct:.1f}%（上限 {max_kelly_shares} 股）。",
+                                size=12,
+                                color="#feb2b2",
+                            ),
+                            ft.Text(
+                                f"• 機械化指令：在股數透過右側反彈減碼降至 {max_kelly_shares} 股以下之前，嚴格凍結加碼！請直接執行下方右側「📉 方案 B：三階梯分批減碼方案」（需減碼 {excess_trim_shares} 股）。",
+                                size=12,
+                                color="#ffffff",
+                                weight=ft.FontWeight.BOLD,
+                            ),
+                        ],
+                        spacing=4,
+                    ),
                 )
             else:
                 trend_txt = "✅ 股價站上均線（符合右側順勢加碼條件）" if is_trend_ok else "⚠️ 股價仍處均線下方（建議等待突破 20MA 或於費氏支撐試單，勿重倉接刀）"
                 gate_banner = ft.Container(
-                    bgcolor="#0f291e", border=safe_border(1.5, "#22c55e"), border_radius=10, padding=12,
-                    content=ft.Column([
-                        ft.Text("✅ 【風控守門員放行：具備加碼 / 新股建倉空間】", size=14, weight=ft.FontWeight.BOLD, color="#68d391"),
-                        ft.Text(f"• 可用額度：距離半凱利 {sim_kelly_pct:.1f}% 上限尚可買入 {remaining_kelly_shares} 股（約 ${remaining_kelly_val:,.2f} 美元）；本次規劃動用預算 ${effective_add_budget:,.2f} 美元。", size=12, color="#c6f6d5"),
-                        ft.Text(f"• 趨勢位階：{trend_txt}", size=12, color="#ffffff", weight=ft.FontWeight.BOLD),
-                    ], spacing=4)
+                    bgcolor="#0f291e",
+                    border=safe_border(1.5, "#22c55e"),
+                    border_radius=10,
+                    padding=12,
+                    content=ft.Column(
+                        [
+                            ft.Text("✅ 【風控守門員放行：具備加碼 / 新股建倉空間】", size=14, weight=ft.FontWeight.BOLD, color="#68d391"),
+                            ft.Text(
+                                f"• 可用額度：距離半凱利 {sim_kelly_pct:.1f}% 上限尚可買入 {remaining_kelly_shares} 股（約 ${remaining_kelly_val:,.2f} 美元）；本次規劃動用預算 ${effective_add_budget:,.2f} 美元。",
+                                size=12,
+                                color="#c6f6d5",
+                            ),
+                            ft.Text(f"• 趨勢位階：{trend_txt}", size=12, color="#ffffff", weight=ft.FontWeight.BOLD),
+                        ],
+                        spacing=4,
+                    ),
                 )
             t4_result_col.controls.append(gate_banner)
 
@@ -936,40 +1216,83 @@ def main(page: ft.Page):
             ]
 
             t4_result_col.controls.append(
-                ft.Row([
-                    ft.Container(expand=True, content=make_table_box(f"📈 【方案 A】{target_ticker} 金字塔三階梯加碼 / 建倉試算表 (40% / 35% / 25%)", buy_headers, buy_rows, "#3182ce")),
-                    ft.Container(expand=True, content=make_table_box(f"📉 【方案 B】{target_ticker} 費波納契三階梯減碼 / 停利試算表 (30% / 40% / 30%)", sell_headers, sell_rows, "#48bb78")),
-                ], wrap=True, spacing=12)
+                ft.Row(
+                    [
+                        ft.Container(
+                            expand=True,
+                            content=make_table_box(
+                                f"📈 【方案 A】{target_ticker} 金字塔三階梯加碼 / 建倉試算表 (40% / 35% / 25%)",
+                                buy_headers,
+                                buy_rows,
+                                "#3182ce",
+                            ),
+                        ),
+                        ft.Container(
+                            expand=True,
+                            content=make_table_box(
+                                f"📉 【方案 B】{target_ticker} 費波納契三階梯減碼 / 停利試算表 (30% / 40% / 30%)",
+                                sell_headers,
+                                sell_rows,
+                                "#48bb78",
+                            ),
+                        ),
+                    ],
+                    wrap=True,
+                    spacing=12,
+                )
             )
 
             existing_syms = [x["Ticker"] for x in portfolio_data]
             if target_ticker not in existing_syms and b1_shares > 0:
                 def add_t4_to_main(e):
-                    portfolio_data.append({
-                        "Ticker": target_ticker,
-                        "Name": target_ticker,
-                        "Shares": b1_shares,
-                        "Avg_Cost": buy_p1,
-                        "Target_Kelly_Pct": sim_kelly_pct,
-                        "Hard_Stop": round(buy_p1 - 2.0 * live_atr, 2),
-                        "Key_Fib_Target": fib_618_lvl,
-                    })
+                    portfolio_data.append(
+                        {
+                            "Ticker": target_ticker,
+                            "Name": target_ticker,
+                            "Shares": b1_shares,
+                            "Avg_Cost": buy_p1,
+                            "Target_Kelly_Pct": sim_kelly_pct,
+                            "Hard_Stop": round(buy_p1 - 2.0 * live_atr, 2),
+                            "Key_Fib_Target": fib_618_lvl,
+                        }
+                    )
                     refresh_all(force_api=False)
 
                 t4_result_col.controls.append(
-                    make_btn(f"➕ 將新標的 {target_ticker} (第 1 批 {b1_shares} 股 @ ${buy_p1:.2f}) 加入主表模擬", add_t4_to_main, "#38a169")
+                    make_btn(
+                        f"➕ 將新標的 {target_ticker} (第 1 批 {b1_shares} 股 @ ${buy_p1:.2f}) 加入主表模擬",
+                        add_t4_to_main,
+                        "#38a169",
+                    )
                 )
 
             page.update()
 
         tab4_col.controls.append(
             ft.Container(
-                bgcolor="#161b26", border=safe_border(1, "#2d3748"), border_radius=12, padding=14,
-                content=ft.Column([
-                    ft.Text("🚀 萬用個股動態加減碼與新股建倉引擎 (點選下方快速標籤或手動輸入代號)", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
-                    ft.Row(chip_buttons, wrap=True, spacing=6),
-                    ft.Row([t4_ticker_tf, t4_shares_tf, t4_cost_tf, t4_kelly_tf, t4_budget_tf, make_btn("🔍 立即試算加減碼", run_tab4_engine, "#2563eb")], wrap=True, spacing=10),
-                ], spacing=10)
+                bgcolor="#161b26",
+                border=safe_border(1, "#2d3748"),
+                border_radius=12,
+                padding=14,
+                content=ft.Column(
+                    [
+                        ft.Text("🚀 萬用個股動態加減碼與新股建倉引擎 (點選下方快速標籤或手動輸入代號)", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
+                        ft.Row(chip_buttons, wrap=True, spacing=6),
+                        ft.Row(
+                            [
+                                t4_ticker_tf,
+                                t4_shares_tf,
+                                t4_cost_tf,
+                                t4_kelly_tf,
+                                t4_budget_tf,
+                                make_btn("🔍 立即試算加減碼", run_tab4_engine, "#2563eb"),
+                            ],
+                            wrap=True,
+                            spacing=10,
+                        ),
+                    ],
+                    spacing=10,
+                ),
             )
         )
         tab4_col.controls.append(t4_result_col)
@@ -988,7 +1311,7 @@ def main(page: ft.Page):
     def render_tab_nav():
         tab_nav_row.controls.clear()
         for idx, t_label in enumerate(tab_titles):
-            is_act = (active_tab_idx[0] == idx)
+            is_act = active_tab_idx[0] == idx
             bg_c = "#1e3a8a" if is_act else "#161b26"
             txt_c = "#60a5fa" if is_act else "#a0aec0"
             b_col = "#3b82f6" if is_act else "#2d3748"
@@ -996,12 +1319,13 @@ def main(page: ft.Page):
             def make_switch_fn(i):
                 def _sw(e):
                     active_tab_idx[0] = i
-                    tab1_col.visible = (i == 0)
-                    tab2_col.visible = (i == 1)
-                    tab3_col.visible = (i == 2)
-                    tab4_col.visible = (i == 3)
+                    tab1_col.visible = i == 0
+                    tab2_col.visible = i == 1
+                    tab3_col.visible = i == 2
+                    tab4_col.visible = i == 3
                     render_tab_nav()
                     page.update()
+
                 return _sw
 
             tab_nav_row.controls.append(
@@ -1031,47 +1355,69 @@ def main(page: ft.Page):
             border=safe_border(1, "#2d3748"),
             border_radius=12,
             padding=16,
-            content=ft.Column([
-                ft.Row([
-                    ft.Column([
-                        ft.Text("📊 美股量化風控 × 費波納契 × 半凱利操盤系統 (Flet 原生旗艦版)", size=22, weight=ft.FontWeight.BOLD, color="#ffffff"),
-                        ft.Text("結合 Python yfinance 自動化行情抓取、費波納契時空共振 (自選起始日 T+0 推算)、ATR 動態停損與萬用加減碼建倉模型", size=12, color="#a0aec0"),
-                    ], expand=True),
-                    make_btn("⚡ 立即強制更新即時報價", lambda e: refresh_all(force_api=True), "#2563eb"),
-                    make_btn("🔄 重置預設持股", reset_defaults, "#4a5568"),
-                ], wrap=True, spacing=10),
-                loading_bar,
-                ft.Divider(height=10, color="#2d3748"),
-                ft.Row([
-                    sw_live, sw_ext, tf_cash, tf_tax, tf_shock, tf_beta,
-                    make_btn("✅ 套用參數並重算", lambda e: refresh_all(force_api=False), "#38a169"),
-                ], wrap=True, spacing=12),
-                ft.Divider(height=8, color="#2d3748"),
-                # 費波納契時間週期起始日自由設定列
-                ft.Row([
-                    tf_anchor_date,
-                    make_btn("📅 彈出日曆選取", open_native_datepicker, "#3182ce", pad_v=8, pad_h=12),
-                    make_btn("📌 設為 10/16 波段基準", lambda e: set_quick_anchor("2026-10-16"), "#1e293b", "#90cdf4", pad_v=8, pad_h=10, border_col="#3182ce"),
-                    make_btn("📌 設為 10/20 破底翻日", lambda e: set_quick_anchor("2026-10-20"), "#1e293b", "#68d391", pad_v=8, pad_h=10, border_col="#2f855a"),
-                    make_btn("📌 設為今日 (T+0)", lambda e: set_quick_anchor(datetime.date.today().strftime("%Y-%m-%d")), "#1e293b", "#fbd38d", pad_v=8, pad_h=10, border_col="#dd6b20"),
-                    sw_trading_days,
-                    make_btn("⏱️ 重新推算時間窗", lambda e: (render_time_zones(), page.update()), "#805ad5", pad_v=8, pad_h=12),
-                ], wrap=True, spacing=10),
-            ], spacing=8)
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Column(
+                                [
+                                    ft.Text("📊 美股量化風控 × 費波納契 × 半凱利操盤系統 (Flet 原生旗艦版)", size=22, weight=ft.FontWeight.BOLD, color="#ffffff"),
+                                    ft.Text(
+                                        "結合 Python yfinance 自動化行情抓取、費波納契時空共振 (自選起始日 T+0 推算)、ATR 動態停損與萬用加減碼建倉模型",
+                                        size=12,
+                                        color="#a0aec0",
+                                    ),
+                                ],
+                                expand=True,
+                            ),
+                            make_btn("⚡ 立即強制更新即時報價", lambda e: refresh_all(force_api=True), "#2563eb"),
+                            make_btn("🔄 重置預設持股", reset_defaults, "#4a5568"),
+                        ],
+                        wrap=True,
+                        spacing=10,
+                    ),
+                    loading_bar,
+                    ft.Divider(height=10, color="#2d3748"),
+                    ft.Row(
+                        [
+                            sw_live,
+                            sw_ext,
+                            tf_cash,
+                            tf_tax,
+                            tf_shock,
+                            tf_beta,
+                            make_btn("✅ 套用參數並重算", lambda e: refresh_all(force_api=False), "#38a169"),
+                        ],
+                        wrap=True,
+                        spacing=12,
+                    ),
+                    ft.Divider(height=8, color="#2d3748"),
+                    # 費波納契時間週期起始日自由設定列
+                    ft.Row(
+                        [
+                            tf_anchor_date,
+                            make_btn("📅 彈出日曆選取", open_native_datepicker, "#3182ce", pad_v=8, pad_h=12),
+                            make_btn("📌 設為 10/16 波段基準", lambda e: set_quick_anchor("2026-10-16"), "#1e293b", "#90cdf4", pad_v=8, pad_h=10, border_col="#3182ce"),
+                            make_btn("📌 設為 10/20 破底翻日", lambda e: set_quick_anchor("2026-10-20"), "#1e293b", "#68d391", pad_v=8, pad_h=10, border_col="#2f855a"),
+                            make_btn("📌 設為今日 (T+0)", lambda e: set_quick_anchor(datetime.date.today().strftime("%Y-%m-%d")), "#1e293b", "#fbd38d", pad_v=8, pad_h=10, border_col="#dd6b20"),
+                            sw_trading_days,
+                            make_btn("⏱️ 重新推算時間窗", lambda e: (render_time_zones(), page.update()), "#805ad5", pad_v=8, pad_h=12),
+                        ],
+                        wrap=True,
+                        spacing=10,
+                    ),
+                ],
+                spacing=8,
+            ),
         ),
-
         # 5 大核心 KPI 儀表板
         kpi_row_container,
-
-        # ⏱️ 費波納契時間週期變盤視窗 (Fibonacci Time Zones)
+        # ⏱️ 費波納契時間週期變盤視窗
         tz_header_text,
         tz_row_container,
-
         ft.Divider(height=10, color="#2d3748"),
-
         # 四大核心操作分頁導航列
         tab_nav_row,
-
         # 四大分頁內容區
         tab1_col,
         tab2_col,
@@ -1081,8 +1427,9 @@ def main(page: ft.Page):
 
     refresh_all(force_api=False)
 
+
 # ==========================================
-# 5. 啟動 Web 瀏覽器投影模式 (Port 8550)
+# 5. 啟動
 # ==========================================
 if __name__ == "__main__":
     ft.run(main, view=ft.AppView.WEB_BROWSER, port=8550, host="0.0.0.0")
