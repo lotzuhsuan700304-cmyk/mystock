@@ -1,0 +1,6 @@
+[project]
+name="quantrisk"
+version="1.0.0"
+dependencies=["flet","requests"]
+[tool.flet.android]
+permission.INTERNET=true
