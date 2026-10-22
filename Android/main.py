@@ -1431,5 +1431,20 @@ def main(page: ft.Page):
 # ==========================================
 # 5. 啟動
 # ==========================================
+def main_with_error_handling(page: ft.Page):
+    try:
+        main(page)
+    except Exception as e:
+        import traceback
+        page.controls.clear()
+        page.add(
+            ft.Column([
+                ft.Text("App 發生錯誤：", size=20, color="red", weight=ft.FontWeight.BOLD),
+                ft.Text(str(e), size=14, color="white"),
+                ft.Text(traceback.format_exc(), size=12, color="#aaaaaa", selectable=True),
+            ], scroll=ft.ScrollMode.AUTO)
+        )
+        page.update()
+
 if __name__ == "__main__":
-    ft.run(main, view=ft.AppView.WEB_BROWSER, port=8550, host="0.0.0.0")
+    ft.run(main_with_error_handling, view=ft.AppView.WEB_BROWSER, port=8550, host="0.0.0.0")
