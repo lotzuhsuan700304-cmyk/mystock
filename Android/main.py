@@ -94,7 +94,7 @@ def make_btn(text: str, on_click_fn, bg_color: str = "#2563eb", text_color: str 
         bgcolor=bg_color,
         border=safe_border(1.5, border_col) if border_col else None,
         border_radius=8,
-        padding=ft.padding.symmetric(vertical=pad_v, horizontal=pad_h) if hasattr(ft, "padding") else 10,
+        padding=ft.padding.all(vertical=pad_v, horizontal=pad_h) if hasattr(ft, "padding") else 10,
         on_click=on_click_fn,
         expand=expand,
     )
