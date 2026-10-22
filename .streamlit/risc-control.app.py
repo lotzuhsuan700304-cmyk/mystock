@@ -59,7 +59,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 初始投資組合配置 (已移除 INTC，NBIS 550 股)
+# 2. 初始投資組合與美股交易日推算函數
 # ==========================================
 DEFAULT_PORTFOLIO = [
     {"Ticker": "NBIS", "Name": "Nebius Group", "Shares": 550, "Avg_Cost": 226.215, "Target_Kelly_Pct": 15.0, "Hard_Stop": 159.00, "Key_Fib_Target": 195.80},
@@ -73,8 +73,31 @@ DEFAULT_PORTFOLIO = [
 if "portfolio_df" not in st.session_state:
     st.session_state.portfolio_df = pd.DataFrame(DEFAULT_PORTFOLIO)
 
+US_HOLIDAYS_2026 = {
+    datetime.date(2026, 1, 1),
+    datetime.date(2026, 1, 19),
+    datetime.date(2026, 2, 16),
+    datetime.date(2026, 4, 3),
+    datetime.date(2026, 5, 25),
+    datetime.date(2026, 6, 19),
+    datetime.date(2026, 7, 3),
+    datetime.date(2026, 9, 7),
+    datetime.date(2026, 11, 26),
+    datetime.date(2026, 12, 25),
+}
+
+def add_us_trading_days(start_date: datetime.date, trading_days: int) -> datetime.date:
+    """從基準日往後推算指定美股交易日數（自動跳過週末與美股休市日）"""
+    cur_dt = start_date
+    added = 0
+    while added < trading_days:
+        cur_dt += datetime.timedelta(days=1)
+        if cur_dt.weekday() < 5 and cur_dt not in US_HOLIDAYS_2026:
+            added += 1
+    return cur_dt
+
 # ==========================================
-# 3. 側邊欄：即時報價、盤前交易與資金設定
+# 3. 側邊欄：即時報價、盤前交易、費氏週期基準日與資金設定
 # ==========================================
 with st.sidebar:
     st.markdown("### 📡 即時行情與盤前交易設定")
@@ -85,6 +108,20 @@ with st.sidebar:
         st.cache_data.clear()
         st.success("已清空行情快取，重新連線最新報價！")
         st.rerun()
+
+    st.divider()
+    st.markdown("### ⏱️ 費波納契時間週期設定")
+    anchor_date = st.date_input(
+        "🗓️ 波段轉折起始基準日 (T+0)",
+        value=datetime.date(2026, 10, 16),
+        help="選擇波段高點、低點或關鍵財報日作為 T+0，系統將自動推算 T+5、T+8、T+13、T+21、T+34 美股交易日變盤窗"
+    )
+    tz_day_mode = st.radio(
+        "週期推算模式",
+        options=["美股交易日 (扣除週末與假日)", "自然日曆天"],
+        index=0,
+        horizontal=True
+    )
 
     st.divider()
     st.markdown("### 💰 資金池與帳戶配置")
@@ -110,7 +147,7 @@ with st.sidebar:
     st.divider()
     st.markdown("### ⚙️ 半凱利風控參數")
     default_kelly_cap = st.slider("新股預設半凱利單檔上限 (%)", min_value=5.0, max_value=25.0, value=15.0, step=1.0)
-    if st.button("🔄 重置為預設持股狀態"):
+    if st.button("🔄 重置為預設持股狀態", use_container_width=True):
         st.session_state.portfolio_df = pd.DataFrame(DEFAULT_PORTFOLIO)
         st.rerun()
 
@@ -128,7 +165,6 @@ def fetch_ticker_quant_metrics(ticker: str, get_extended: bool = True):
         reg_close = float(hist["Close"].iloc[-1])
         prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else reg_close
 
-        # 嘗試抓取盤前/盤後 1 分鐘延長交易最新報價
         current_price = reg_close
         market_session = "常規收盤"
         if get_extended:
@@ -144,34 +180,29 @@ def fetch_ticker_quant_metrics(ticker: str, get_extended: bool = True):
 
         day_chg_pct = ((current_price - prev_close) / prev_close) * 100.0
 
-        # 近 6 個月波段高低點
         recent = hist.tail(126)
         swing_high = float(recent["High"].max())
         swing_low = float(recent["Low"].min())
         diff = max(swing_high - swing_low, 0.01)
 
-        # 費波納契價位
         fib_0236 = swing_low + diff * 0.236
         fib_0382 = swing_low + diff * 0.382
         fib_0618 = swing_low + diff * 0.618
         fib_1272 = swing_low + diff * 1.272
         fib_neg0236 = swing_low - diff * 0.236
 
-        # 14D ATR
         high_low = hist["High"] - hist["Low"]
         high_close = (hist["High"] - hist["Close"].shift()).abs()
         low_close = (hist["Low"] - hist["Close"].shift()).abs()
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         atr_14 = float(tr.rolling(14).mean().iloc[-1]) if len(tr) >= 14 else reg_close * 0.04
 
-        # 14D RSI
         delta = hist["Close"].diff()
         gain = delta.where(delta > 0, 0.0).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
         rs = gain / loss.replace(0, np.nan)
         rsi_14 = float((100 - (100 / (1 + rs))).iloc[-1]) if not rs.dropna().empty else 50.0
 
-        # 均線系統
         ma20 = float(hist["Close"].rolling(20).mean().iloc[-1]) if len(hist) >= 20 else reg_close
         ma50 = float(hist["Close"].rolling(50).mean().iloc[-1]) if len(hist) >= 50 else reg_close
         ma200 = float(hist["Close"].rolling(200).mean().iloc[-1]) if len(hist) >= 200 else ma50
@@ -268,10 +299,26 @@ if not df_calc.empty and total_portfolio_equity > 0:
     df_calc["Weight_Pct"] = round((df_calc["Market_Value"] / total_portfolio_equity) * 100.0, 2)
     df_calc["Optimal_Shares"] = np.floor((total_portfolio_equity * (df_calc["Target_Kelly_Pct"] / 100.0)) / df_calc["Price"]).astype(int)
     df_calc["Share_Diff"] = df_calc["Optimal_Shares"] - df_calc["Shares"]
+    
+    # 機械化風控操作指令判讀
+    signals = []
+    for _, r in df_calc.iterrows():
+        if r["Price"] <= r["Hard_Stop"]:
+            signals.append("🚨 觸及底線：強制減碼/停損")
+        elif r["Price"] >= r["Key_Fib_Target"] and r["Weight_Pct"] > r["Target_Kelly_Pct"]:
+            signals.append("🎯 達費氏目標：執行階梯減碼")
+        elif r["Weight_Pct"] > r["Target_Kelly_Pct"] + 2.0:
+            signals.append("⚠️ 權重超配：禁攤平/反彈減碼")
+        elif r["Price"] >= r["MA20"] and r["Weight_Pct"] < r["Target_Kelly_Pct"] - 2.0:
+            signals.append("🚀 右側強勢：可順勢加碼")
+        else:
+            signals.append("✅ 權重安全：紀律續抱")
+    df_calc["Action_Signal"] = signals
 else:
     df_calc["Weight_Pct"] = 0.0
     df_calc["Optimal_Shares"] = 0
     df_calc["Share_Diff"] = 0
+    df_calc["Action_Signal"] = "✅ 觀望"
 
 # 計算前兩大持股集中度與 VaR
 sorted_weights = df_calc["Weight_Pct"].sort_values(ascending=False) if not df_calc.empty else pd.Series([0.0])
@@ -288,7 +335,7 @@ releasable_cash = float((excess_shares * df_calc["Price"]).sum()) + cash_pool
 # ==========================================
 st.markdown("## 📊 美股量化風控 × 費波納契 × 半凱利操盤系統")
 status_feed_txt = "🟢 yfinance 即時/盤前連線中" if enable_live_feed else "🟡 手動改價模式"
-st.caption(f"連線狀態：{status_feed_txt} | 結合費波納契時空共振 (0.382 / 0.618 / 1.272)、ATR 動態停損與萬用加減碼建倉模型")
+st.caption(f"連線狀態：{status_feed_txt} | 週期基準日 (T+0)：{anchor_date.strftime('%Y/%m/%d')} | 結合費波納契時空共振、ATR 動態停損與萬用加減碼模型")
 
 k1, k2, k3, k4, k5 = st.columns(5)
 with k1:
@@ -308,7 +355,7 @@ with k2:
     <div class="kpi-card">
         <div class="kpi-title">未實現總損益 (USD / %)</div>
         <div class="kpi-val" style="color:{pnl_color};">${total_pnl:,.2f}</div>
-        <div class="kpi-sub" style="color:{pnl_color};">{sub_k2}</div>
+        <div class="kpi-sub">{sub_k2}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -318,7 +365,7 @@ with k3:
     <div class="kpi-card">
         <div class="kpi-title">前兩大持股集中度 (NBIS+MRVL)</div>
         <div class="kpi-val" style="color:{conc_color};">{top2_conc:.2f}%</div>
-        <div class="kpi-sub">半凱利建議安全上限: ≤ 35.0%</div>
+        <div class="kpi-sub">半凱利建議安全上限: <= 35.0%</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -345,22 +392,46 @@ with k5:
 st.write("")
 
 # ==========================================
-# 6. 費波納契時間週期變盤視窗 (無重複版本)
+# 6. 費波納契時間週期變盤視窗 (動態起始基準日推算版)
 # ==========================================
-st.markdown("#### ⏱️ 費波納契時間週期變盤視窗 (Fibonacci Time Zones)")
-tz_cols = st.columns(5)
-tz_events = [
-    ("T+5 短線確認窗", "2026/10/23", "檢視 NBIS $175 / MRVL $247.77 壓力與 5MA 翻揚", "#ed8936", True),
-    ("T+8 第一減碼窗", "2026/10/28", "觀察反彈測試 0.236~0.382 壓力區動能", "#ecc94b", False),
-    ("T+13 波段分水嶺", "2026/11/04", "日線月線 (20MA) 扣抵，執行第一階段減碼", "#4299e1", False),
-    ("T+21 中期轉折窗", "2026/11/16", "挑戰 0.618 黃金分割強壓區與財報指引兌現", "#48bb78", False),
-    ("T+34 季線大變盤窗", "2026/12/04", "60MA 季線方向定調與完成組合再平衡", "#9f7aea", False),
+tz_head_col1, tz_head_col2 = st.columns([3.2, 1.8])
+with tz_head_col1:
+    st.markdown(f"#### ⏱️ 費波納契時間週期變盤視窗 (基準日 T+0：`{anchor_date.strftime('%Y/%m/%d')}` | 模式：`{tz_day_mode}`)")
+with tz_head_col2:
+    st.caption("💡 可於左側邊欄「⏱️ 費波納契時間週期設定」自由切換起始基準日")
+
+fib_specs = [
+    (5,  "T+5 短線確認窗",  "檢視 NBIS $175 / MRVL $247.77 壓力與 5MA 翻揚", "#ed8936"),
+    (8,  "T+8 第一減碼窗",  "觀察反彈測試 0.236~0.382 壓力區動能",         "#ecc94b"),
+    (13, "T+13 波段分水嶺", "日線月線 (20MA) 扣抵，執行第一階段減碼",       "#4299e1"),
+    (21, "T+21 中期轉折窗", "挑戰 0.618 黃金分割強壓區與財報指引兌現",     "#48bb78"),
+    (34, "T+34 季線大變盤窗","60MA 季線方向定調與完成組合再平衡",           "#9f7aea"),
 ]
+
 today_dt = datetime.date.today()
-for col, (title, dt_str, desc, color, is_hl) in zip(tz_cols, tz_events):
-    target_dt = datetime.datetime.strptime(dt_str, "%Y/%m/%d").date()
-    days_left = (target_dt - today_dt).days
-    day_badge = f"還有 {days_left} 天" if days_left >= 0 else f"已過 {abs(days_left)} 天"
+computed_tz = []
+for f_num, title, desc, color in fib_specs:
+    if tz_day_mode.startswith("美股交易日"):
+        t_dt = add_us_trading_days(anchor_date, f_num)
+    else:
+        t_dt = anchor_date + datetime.timedelta(days=f_num)
+    d_left = (t_dt - today_dt).days
+    computed_tz.append((f_num, title, t_dt, d_left, desc, color))
+
+# 自動找出距離今天最近的一個未來（或當日）變盤視窗進行高亮標示
+upcoming_positives = [item[3] for item in computed_tz if item[3] >= 0]
+highlight_days = min(upcoming_positives) if upcoming_positives else None
+
+tz_cols = st.columns(5)
+for col, (f_num, title, t_dt, d_left, desc, color) in zip(tz_cols, computed_tz):
+    dt_str = t_dt.strftime("%Y/%m/%d")
+    if d_left > 0:
+        day_badge = f"還有 {d_left} 天"
+    elif d_left == 0:
+        day_badge = "🔥 今日變盤！"
+    else:
+        day_badge = f"已過 {abs(d_left)} 天"
+    is_hl = (highlight_days is not None and d_left == highlight_days)
     card_cls = "tz-card tz-highlight" if is_hl else "tz-card"
     with col:
         st.markdown(f"""
@@ -410,6 +481,7 @@ with tab1:
             "Key_Fib_Target": st.column_config.NumberColumn("關鍵費氏目標 ($)", format="$%.2f"),
             "Hard_Stop": st.column_config.NumberColumn("硬性防守底線 ($)", format="$%.2f"),
             "ATR": st.column_config.NumberColumn("14D ATR ($)", format="$%.2f", disabled=True),
+            "Action_Signal": st.column_config.TextColumn("機械化操作指令", disabled=True),
         },
         hide_index=True
     )
