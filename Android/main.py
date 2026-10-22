@@ -1,6 +1,39 @@
 import datetime
 import flet as ft
-import yfinance as yf
+import requests
+class _YFHistory:
+    def __init__(self, closes):
+        self.empty = len(closes) == 0
+        self._closes = closes
+        self.Close = self
+    @property
+    def iloc(self):
+        return self._closes
+    def __getitem__(self, k):
+        return self if k == "Close" else self._closes[k]
+    def __len__(self):
+        return len(self._closes)
+class _YFTicker:
+    def __init__(self, symbol):
+        self.symbol = symbol.strip().upper()
+        self._closes = []
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{self.symbol}?interval=1d&range=3mo"
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8).json()
+            res = r.get("chart", {}).get("result", [])
+            if res:
+                q = res[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
+                self._closes = [float(x) for x in q if x is not None]
+        except Exception:
+            pass
+        self.fast_info = {"last_price": self._closes[-1] if self._closes else 0.0, "previous_close": self._closes[-2] if len(self._closes) > 1 else 0.0}
+        self.info = {"regularMarketPrice": self.fast_info["last_price"], "currentPrice": self.fast_info["last_price"], "previousClose": self.fast_info["previous_close"]}
+    def history(self, *args, **kwargs):
+        return _YFHistory(self._closes)
+class _YFModule:
+    Ticker = _YFTicker
+yf = _YFModule()
+
 import pandas as pd
 import numpy as np
 
