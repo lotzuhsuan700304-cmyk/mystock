@@ -1,8 +1,9 @@
 import asyncio
 import datetime
+import json
 import math
+import urllib.request
 import flet as ft
-import requests
 
 
 class _YFTicker:
@@ -16,7 +17,9 @@ class _YFTicker:
                 "https://query1.finance.yahoo.com/v8/finance/chart/"
                 f"{self.symbol}?interval=1d&range=1y"
             )
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8).json()
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                r = json.loads(resp.read().decode("utf-8"))
             res = r.get("chart", {}).get("result", [])
             if res:
                 q = res[0].get("indicators", {}).get("quote", [{}])[0]
