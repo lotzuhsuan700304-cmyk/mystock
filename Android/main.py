@@ -21,7 +21,7 @@ class _YFTicker:
                 f"{self.symbol}?interval=1d&range=1y&includePrePost={prepost_str}"
             )
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
+            with urllib.request.urlopen(req, timeout=4) as resp:
                 r = json.loads(resp.read().decode("utf-8"))
             res = r.get("chart", {}).get("result", [])
             if res:
@@ -54,14 +54,6 @@ class _YFTicker:
                         self.session_label = "盤中/收盤"
         except Exception:
             pass
-        last = self.closes[-1] if self.closes else 0.0
-        prev = self.closes[-2] if len(self.closes) > 1 else 0.0
-        self.fast_info = {"last_price": self.ext_price or last, "previous_close": prev}
-        self.info = {
-            "regularMarketPrice": last,
-            "currentPrice": self.ext_price or last,
-            "previousClose": prev,
-        }
 
 
 class _YFModule:
@@ -104,69 +96,52 @@ def add_us_trading_days(start_date: datetime.date, trading_days: int) -> datetim
     return cur_dt
 
 
-# --- 跨版本 Flet 相容包裝函式 (解決 module 'flet.controls.padding' has no attribute 錯誤) ---
-def safe_border(width: float, color: str):
-    try:
-        if hasattr(ft, "Border") and hasattr(ft, "BorderSide"):
-            side = ft.BorderSide(width=width, color=color)
-            return ft.Border(top=side, bottom=side, left=side, right=side)
-        return ft.border.all(width, color)
-    except Exception:
-        return None
-
-
-def safe_padding(vertical: float = 0, horizontal: float = 0):
-    try:
-        if hasattr(ft, "Padding"):
-            return ft.Padding(left=horizontal, top=vertical, right=horizontal, bottom=vertical)
-        return int(max(vertical, horizontal))
-    except Exception:
-        return int(max(vertical, horizontal))
-
-
-def make_btn(text, on_click_fn, bg_color="#2563eb", text_color="#ffffff", expand=False, pad_v=10, pad_h=14, border_col=None):
+# --- 零崩潰按鈕與表格元件 (不使用內層 Row 與 Padding/Border 物件，徹底杜絕灰色 RenderErrorBox) ---
+def make_btn(text: str, on_click_fn, bg_color: str = "#2563eb", text_color: str = "#ffffff", pad: int = 10, width: int = None):
     return ft.Container(
-        content=ft.Row(
-            [ft.Text(text, color=text_color, size=13, weight=ft.FontWeight.BOLD)],
-            alignment=ft.MainAxisAlignment.CENTER,
+        content=ft.Text(
+            text,
+            color=text_color,
+            size=13,
+            weight=ft.FontWeight.BOLD,
+            text_align=ft.TextAlign.CENTER,
         ),
         bgcolor=bg_color,
-        border=safe_border(1.5, border_col) if border_col else None,
         border_radius=8,
-        padding=safe_padding(vertical=pad_v, horizontal=pad_h),
+        padding=pad,
+        width=width,
         on_click=on_click_fn,
-        expand=expand,
     )
 
 
-def make_table_box(title: str, headers: list, rows: list, border_color: str = "#2d3748"):
+def make_table_box(title: str, headers: list, rows: list, header_bg: str = "#1e3a8a"):
     header_cells = [
-        ft.Container(content=ft.Text(h, size=12, weight=ft.FontWeight.BOLD, color="#90cdf4"), expand=True)
+        ft.Container(content=ft.Text(str(h), size=11, weight=ft.FontWeight.BOLD, color="#90cdf4"), expand=1)
         for h in headers
     ]
     table_rows = [
-        ft.Container(bgcolor="#1e293b", padding=8, border_radius=6, content=ft.Row(header_cells))
+        ft.Container(bgcolor=header_bg, padding=8, border_radius=6, content=ft.Row(header_cells, spacing=4))
     ]
-    for r in rows:
+    for idx, r in enumerate(rows):
+        row_bg = "#1a2232" if idx % 2 == 0 else "#131824"
         row_cells = [
-            ft.Container(content=ft.Text(str(c), size=12, color="#e2e8f0"), expand=True) for c in r
+            ft.Container(content=ft.Text(str(c), size=11, color="#e2e8f0"), expand=1) for c in r
         ]
         table_rows.append(
             ft.Container(
+                bgcolor=row_bg,
                 padding=8,
-                border=safe_border(0.5, "#2d3748"),
                 border_radius=4,
-                content=ft.Row(row_cells),
+                content=ft.Row(row_cells, spacing=4),
             )
         )
     return ft.Container(
         bgcolor="#161b26",
-        border=safe_border(1, border_color),
         border_radius=12,
-        padding=14,
+        padding=12,
         content=ft.Column(
             [
-                ft.Text(title, size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
+                ft.Text(title, size=14, weight=ft.FontWeight.BOLD, color="#f7fafc"),
                 ft.Column(table_rows, spacing=4),
             ],
             spacing=8,
@@ -248,53 +223,91 @@ def fetch_quant_metrics(ticker: str, get_extended: bool = True, force_refresh: b
 
 
 async def main(page: ft.Page):
-    page.title = "美股量化風控 × 費波納契 × 半凱利操盤系統"
+    page.title = "美股量化風控 × 費波納契 × 半凱利"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = "#0e1117"
-    page.padding = 16
+    page.padding = 12
     page.scroll = ft.ScrollMode.AUTO
-    page.add(ft.Text("App 已啟動，正在建立畫面...", size=20, color="white"))
-    page.update()
-    await asyncio.sleep(0.05)
 
     try:
         await _build(page)
     except Exception as e:
         import traceback
-        page.add(ft.Text(f"啟動錯誤: {e}", color="#fc8181", size=16, selectable=True))
+        page.add(ft.Text(f"啟動錯誤: {e}", color="#fc8181", size=15, selectable=True))
         page.add(ft.Text(traceback.format_exc(), size=11, color="#e2e8f0", selectable=True))
         page.update()
 
 
 async def _build(page: ft.Page):
     portfolio_data = [dict(item) for item in DEFAULT_PORTFOLIO]
-    active_tab_idx = [0]
+    active_page_idx = [0]      # 頂部 5 大主分頁索引
+    selected_stock_idx = [0]   # 分頁 2 個股編輯子分頁索引
 
     sw_live = ft.Switch(label="自動抓即時報價", value=True)
-    sw_ext = ft.Switch(label="含盤前/盤後延長價", value=True)
+    sw_ext = ft.Switch(label="含盤前/盤後價", value=True)
     sw_trading_days = ft.Switch(label="按美股交易日推算", value=True)
-    tf_anchor_date = ft.TextField(label="費氏週期起始日 T+0 (YYYY-MM-DD)", value="2026-10-16", width=220)
-    tf_cash = ft.TextField(label="可用美元現金池 ($)", value="9616.50", width=150)
-    tf_tax = ft.TextField(label="累計可抵稅虧損 ($)", value="-3461.52", width=150)
-    tf_shock = ft.TextField(label="大盤衝擊模擬 (%)", value="0", width=130)
-    tf_beta = ft.TextField(label="高Beta敏感倍數", value="1.50", width=130)
+    tf_anchor_date = ft.TextField(label="費氏起始日 T+0", value="2026-10-16", width=155)
+    tf_cash = ft.TextField(label="美元現金池 ($)", value="9616.50", width=145)
+    tf_tax = ft.TextField(label="累計抵稅虧損 ($)", value="-3461.52", width=145)
+    tf_shock = ft.TextField(label="大盤衝擊 (%)", value="0", width=130)
+    tf_beta = ft.TextField(label="Beta敏感倍數", value="1.50", width=130)
+    status_text = ft.Text("就緒", size=11, color="#68d391")
     loading_bar = ft.ProgressBar(visible=False, color="#ecc94b", bgcolor="#1e2536")
 
-    kpi_row_container = ft.Row(wrap=True, spacing=10)
-    tz_header_text = ft.Text("費波納契時間週期變盤視窗", size=16, weight=ft.FontWeight.BOLD, color="#f7fafc")
-    tz_row_container = ft.Row(wrap=True, spacing=10)
-    tab_nav_row = ft.Row(wrap=True, spacing=8)
-    tab1_col = ft.Column(spacing=12, visible=True)
-    tab2_col = ft.Column(spacing=12, visible=False)
-    tab3_col = ft.Column(spacing=12, visible=False)
-    tab4_col = ft.Column(spacing=12, visible=False)
+    # 頂部主分頁導覽列與 5 個獨立頁面容器
+    main_nav_row = ft.Row(wrap=True, spacing=6)
+    page0_overview_col = ft.Column(spacing=10, visible=True)   # 分頁1: 總覽與設定
+    page1_holdings_col = ft.Column(spacing=10, visible=False)  # 分頁2: 風控持倉 (含個股子分頁)
+    page2_fib_col = ft.Column(spacing=10, visible=False)       # 分頁3: 費氏週期與階梯
+    page3_calc_col = ft.Column(spacing=10, visible=False)      # 分頁4: 加減碼與保本試算
+    page4_trim_col = ft.Column(spacing=10, visible=False)      # 分頁5: NBIS/MRVL 減碼專區
 
-    t4_ticker_tf = ft.TextField(label="美股代號", value="NBIS", width=150)
-    t4_shares_tf = ft.TextField(label="目前持有股數 (新股填 0)", value="550", width=170)
-    t4_cost_tf = ft.TextField(label="目前持有均價 ($)", value="226.215", width=160)
-    t4_kelly_tf = ft.TextField(label="半凱利目標上限 (%)", value="15.0", width=160)
-    t4_budget_tf = ft.TextField(label="預計最大動用加碼資金 ($)", value="9616.50", width=190)
-    t4_result_col = ft.Column(spacing=12)
+    kpi_grid_container = ft.Row(wrap=True, spacing=8)
+    tz_header_text = ft.Text("費波納契時間週期變盤視窗", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc")
+    tz_row_container = ft.Row(wrap=True, spacing=8)
+    ladder_col_container = ft.Column(spacing=8)
+
+    t4_ticker_tf = ft.TextField(label="美股代號", value="NBIS", width=130)
+    t4_shares_tf = ft.TextField(label="目前股數", value="550", width=130)
+    t4_cost_tf = ft.TextField(label="持有均價 ($)", value="226.215", width=140)
+    t4_kelly_tf = ft.TextField(label="凱利上限 (%)", value="15.0", width=130)
+    t4_budget_tf = ft.TextField(label="加碼預算 ($)", value="9616.50", width=140)
+    t4_result_col = ft.Column(spacing=10)
+
+    page_titles = [
+        "📊 總覽設定",
+        "🛡️ 風控持倉",
+        "⏳ 費氏週期",
+        "🧮 加減碼試算",
+        "🎯 雙核心減碼",
+    ]
+
+    def render_main_nav():
+        main_nav_row.controls.clear()
+        for idx, title in enumerate(page_titles):
+            is_act = active_page_idx[0] == idx
+
+            def make_page_sw(i):
+                def _sw(e):
+                    active_page_idx[0] = i
+                    page0_overview_col.visible = i == 0
+                    page1_holdings_col.visible = i == 1
+                    page2_fib_col.visible = i == 2
+                    page3_calc_col.visible = i == 3
+                    page4_trim_col.visible = i == 4
+                    render_main_nav()
+                    page.update()
+                return _sw
+
+            main_nav_row.controls.append(
+                make_btn(
+                    title,
+                    make_page_sw(idx),
+                    bg_color="#2563eb" if is_act else "#1e293b",
+                    text_color="#ffffff" if is_act else "#a0aec0",
+                    pad=9,
+                )
+            )
 
     def parse_anchor_date() -> datetime.date:
         raw_str = (tf_anchor_date.value or "").strip().replace("/", "-")
@@ -309,13 +322,13 @@ async def _build(page: ft.Page):
         base_dt = parse_anchor_date()
         use_b_days = sw_trading_days.value
         mode_str = "美股交易日" if use_b_days else "自然日曆天"
-        tz_header_text.value = f"費波納契時間週期 (T+0：{base_dt.strftime('%Y/%m/%d')} | {mode_str})"
+        tz_header_text.value = f"費氏時間窗 (T+0: {base_dt.strftime('%Y/%m/%d')} | {mode_str})"
         fib_specs = [
             (5, "T+5 短線確認窗", "檢視壓力與短均線翻揚", "#ed8936"),
             (8, "T+8 第一減碼窗", "觀察 0.236~0.382 壓力區", "#ecc94b"),
             (13, "T+13 波段分水嶺", "20MA 扣抵，第一階段減碼", "#4299e1"),
             (21, "T+21 中期轉折窗", "0.618 黃金分割強壓", "#48bb78"),
-            (34, "T+34 季線大變盤窗", "季線方向定調與再平衡", "#9f7aea"),
+            (34, "T+34 季線變盤窗", "季線方向定調與再平衡", "#9f7aea"),
         ]
         today_dt = datetime.date.today()
         computed_tz = []
@@ -335,30 +348,22 @@ async def _build(page: ft.Page):
             is_hl = highlight_days is not None and d_left == highlight_days
             tz_row_container.controls.append(
                 ft.Container(
-                    width=235,
-                    bgcolor="#152238" if is_hl else "#131822",
-                    border=safe_border(1.5 if is_hl else 1.0, "#3182ce" if is_hl else "#2d3748"),
+                    width=165,
+                    bgcolor="#1e3a8a" if is_hl else "#161b26",
                     border_radius=10,
-                    padding=12,
+                    padding=10,
                     content=ft.Column(
                         [
-                            ft.Text(f"{title} ({day_badge})", color=color, size=12, weight=ft.FontWeight.BOLD),
-                            ft.Text(t_dt.strftime("%Y/%m/%d"), color="#ffffff", size=18, weight=ft.FontWeight.BOLD),
+                            ft.Text(f"{title}", color=color, size=12, weight=ft.FontWeight.BOLD),
+                            ft.Text(f"{t_dt.strftime('%m/%d')} ({day_badge})", color="#ffffff", size=14, weight=ft.FontWeight.BOLD),
                             ft.Text(desc, color="#a0aec0", size=11),
                         ],
-                        spacing=4,
+                        spacing=3,
                     ),
                 )
             )
 
-    def set_quick_anchor(dt_str: str):
-        tf_anchor_date.value = dt_str
-        render_time_zones()
-        page.update()
-
-    def refresh_all(force_api: bool = False):
-        loading_bar.visible = True
-        page.update()
+    def compute_rows(use_network: bool, force_api: bool):
         try:
             cash_pool = float(tf_cash.value)
         except Exception:
@@ -376,25 +381,32 @@ async def _build(page: ft.Page):
         except Exception:
             beta_mult = 1.50
         shock_factor = 1.0 + (market_shock / 100.0) * beta_mult
+
         live_rows = []
         for item in portfolio_data:
             tkr = str(item["Ticker"]).strip().upper()
             if not tkr:
                 continue
-            if sw_live.value:
+            q = None
+            if use_network and sw_live.value:
                 q = fetch_quant_metrics(tkr, get_extended=sw_ext.value, force_refresh=force_api)
-                raw_price = q["Price"] if q else float(item.get("Avg_Cost", 100.0))
-                atr_val = q["ATR"] if q else round(raw_price * 0.045, 2)
-                fib236 = q["Fib_0236"] if q else round(raw_price * 1.05, 2)
-                fib382 = q["Fib_0382"] if q else round(raw_price * 1.12, 2)
-                fib618 = q["Fib_0618"] if q else round(raw_price * 1.22, 2)
-                ma20_val = q["MA20"] if q else raw_price
-                ma200_val = q["MA200"] if q else raw_price
-                sess_lbl = q["Session"] if q else "自訂"
-                day_chg = q["Day_Chg_Pct"] if q else 0.0
-                rsi_val = q["RSI"] if q else 50.0
-                swing_low = q["Swing_Low"] if q else round(raw_price * 0.88, 2)
-                fib1272 = q["Fib_1272"] if q else round(raw_price * 1.20, 2)
+            elif sw_live.value:
+                cache_key = f"{tkr}_{sw_ext.value}"
+                q = QUOTE_CACHE.get(cache_key)
+
+            if q:
+                raw_price = q["Price"]
+                atr_val = q["ATR"]
+                fib236 = q["Fib_0236"]
+                fib382 = q["Fib_0382"]
+                fib618 = q["Fib_0618"]
+                fib1272 = q["Fib_1272"]
+                ma20_val = q["MA20"]
+                ma200_val = q["MA200"]
+                sess_lbl = q["Session"]
+                day_chg = q["Day_Chg_Pct"]
+                rsi_val = q["RSI"]
+                swing_low = q["Swing_Low"]
             else:
                 raw_price = float(item.get("Manual_Price", item.get("Avg_Cost", 100.0)))
                 atr_val = round(raw_price * 0.045, 2)
@@ -404,10 +416,11 @@ async def _build(page: ft.Page):
                 fib1272 = round(raw_price * 1.30, 2)
                 ma20_val = raw_price
                 ma200_val = raw_price
-                sess_lbl = "手動離線"
+                sess_lbl = "預設/離線"
                 day_chg = 0.0
                 rsi_val = 50.0
                 swing_low = round(raw_price * 0.88, 2)
+
             sim_price = round(raw_price * shock_factor, 2)
             shares = int(float(item.get("Shares", 0)))
             avg_cost = float(item.get("Avg_Cost", sim_price))
@@ -446,6 +459,7 @@ async def _build(page: ft.Page):
         total_cost_val = sum(r["Total_Cost"] for r in live_rows)
         total_pnl = total_stock_val - total_cost_val
         total_pnl_pct = (total_pnl / total_cost_val * 100.0) if total_cost_val > 0 else 0.0
+
         for r in live_rows:
             if total_portfolio_equity > 0 and r["Price"] > 0:
                 r["Weight_Pct"] = round((r["Market_Value"] / total_portfolio_equity) * 100.0, 2)
@@ -455,239 +469,256 @@ async def _build(page: ft.Page):
                 r["Weight_Pct"] = 0.0
                 r["Optimal_Shares"] = 0
                 r["Share_Diff"] = 0
-            if r["Price"] <= r["Hard_Stop"]:
-                r["Action_Signal"] = "觸及底線：強制減碼"
-            elif r["Price"] >= r["Key_Fib_Target"] and r["Weight_Pct"] > r["Target_Kelly_Pct"]:
-                r["Action_Signal"] = "達費氏目標：階梯減碼"
-            elif r["Weight_Pct"] > r["Target_Kelly_Pct"] + 2.0:
-                r["Action_Signal"] = "超配：禁攤平/反彈減碼"
-            elif r["Price"] >= r["MA20"] and r["Weight_Pct"] < r["Target_Kelly_Pct"] - 2.0:
-                r["Action_Signal"] = "右側強勢：可順勢加碼"
-            else:
-                r["Action_Signal"] = "權重安全：紀律續抱"
 
+            if r["Price"] <= r["Hard_Stop"]:
+                r["Action_Signal"] = "觸底減碼"
+            elif r["Price"] >= r["Key_Fib_Target"] and r["Weight_Pct"] > r["Target_Kelly_Pct"]:
+                r["Action_Signal"] = "達標減碼"
+            elif r["Weight_Pct"] > r["Target_Kelly_Pct"] + 2.0:
+                r["Action_Signal"] = "超配禁攤"
+            elif r["Price"] >= r["MA20"] and r["Weight_Pct"] < r["Target_Kelly_Pct"] - 2.0:
+                r["Action_Signal"] = "右側加碼"
+            else:
+                r["Action_Signal"] = "紀律續抱"
+
+        return live_rows, total_stock_val, total_portfolio_equity, total_pnl, total_pnl_pct, cash_pool, realized_loss_tax
+
+    def update_ui_from_rows(live_rows, total_stock_val, total_portfolio_equity, total_pnl, total_pnl_pct, cash_pool, realized_loss_tax):
         sorted_w = sorted([r["Weight_Pct"] for r in live_rows], reverse=True)
         top2_conc = sum(sorted_w[:2]) if len(sorted_w) >= 2 else sum(sorted_w)
         daily_var_95 = sum(r["Shares"] * r["ATR"] * 1.645 for r in live_rows) * 0.65
         weekly_var_95 = daily_var_95 * math.sqrt(5)
         releasable_cash = sum(max(r["Shares"] - r["Optimal_Shares"], 0) * r["Price"] for r in live_rows) + cash_pool
 
-        kpi_row_container.controls.clear()
+        kpi_grid_container.controls.clear()
         pnl_color = "#48bb78" if total_pnl >= 0 else "#f56565"
         conc_color = "#ecc94b" if top2_conc > 35 else "#48bb78"
         kpi_specs = [
-            ("股票總市值 + 現金總淨值 (USD)", f"${total_portfolio_equity:,.2f}", f"股票: ${total_stock_val:,.0f} / 現金: ${cash_pool:,.0f}", "#f7fafc"),
-            ("未實現總損益 (USD / %)", f"${total_pnl:,.2f}", f"總報酬率: {total_pnl_pct:+.2f}%", pnl_color),
-            ("前兩大持股集中度", f"{top2_conc:.2f}%", "半凱利建議上限 <= 35%", conc_color),
-            ("單週 95% VaR", f"-${weekly_var_95:,.0f}", f"單日 95% VaR: -${daily_var_95:,.0f}", "#f56565"),
-            ("可動用現金 + 減碼釋出", f"${releasable_cash:,.0f}", f"現金 ${cash_pool:,.0f} / 可抵稅 ${realized_loss_tax:,.0f}", "#48bb78"),
+            ("總淨值 (股票+現金)", f"${total_portfolio_equity:,.0f}", f"股 ${total_stock_val:,.0f} / 現 ${cash_pool:,.0f}", "#f7fafc"),
+            ("未實現總損益", f"${total_pnl:,.0f}", f"報酬率 {total_pnl_pct:+.2f}%", pnl_color),
+            ("前兩大持股集中度", f"{top2_conc:.1f}%", "凱利上限 <= 35%", conc_color),
+            ("單週 95% VaR 風控", f"-${weekly_var_95:,.0f}", f"單日 -${daily_var_95:,.0f}", "#f56565"),
+            ("可動用現金+釋出", f"${releasable_cash:,.0f}", f"抵稅額 ${realized_loss_tax:,.0f}", "#48bb78"),
         ]
         for k_title, k_val, k_sub, k_col in kpi_specs:
-            kpi_row_container.controls.append(
+            kpi_grid_container.controls.append(
                 ft.Container(
-                    width=235,
+                    width=165,
                     bgcolor="#161b26",
-                    border=safe_border(1, "#2d3748"),
-                    border_radius=12,
-                    padding=14,
+                    border_radius=10,
+                    padding=10,
                     content=ft.Column(
                         [
-                            ft.Text(k_title, color="#a0aec0", size=12),
-                            ft.Text(k_val, color=k_col, size=22, weight=ft.FontWeight.BOLD),
-                            ft.Text(k_sub, color="#718096", size=11),
+                            ft.Text(k_title, color="#a0aec0", size=11),
+                            ft.Text(k_val, color=k_col, size=18, weight=ft.FontWeight.BOLD),
+                            ft.Text(k_sub, color="#718096", size=10),
                         ],
-                        spacing=4,
+                        spacing=3,
                     ),
                 )
             )
+
         render_time_zones()
-        build_tab1(live_rows)
-        build_tab2(live_rows)
-        build_tab3(live_rows)
-        build_tab4(live_rows, total_portfolio_equity, cash_pool)
-        loading_bar.visible = False
+        build_page1_holdings(live_rows)
+        build_page2_ladders(live_rows)
+        build_page3_calc(live_rows, total_portfolio_equity, cash_pool)
+        build_page4_trim(live_rows)
         page.update()
 
-    def build_tab1(live_rows: list):
-        tab1_col.controls.clear()
-        tab1_col.controls.append(ft.Text("可修改股數、均價、凱利上限、費氏目標與防守底線，或新增/刪除股票。", size=13, color="#90cdf4"))
-        headers = ["代號", "股數", "均價", "現價", "總市值", "損益", "權重", "凱利上限", "建議", "費氏目標", "停損", "指令"]
+    def refresh_all(force_api: bool = False, use_network: bool = True):
+        async def _task():
+            loading_bar.visible = True
+            status_text.value = "正在同步報價與重算指標..." if use_network else "正在重算指標..."
+            page.update()
+            try:
+                res = await asyncio.to_thread(compute_rows, use_network, force_api)
+                update_ui_from_rows(*res)
+                status_text.value = f"最後更新: {datetime.datetime.now().strftime('%H:%M:%S')}"
+            except Exception as ex:
+                status_text.value = f"更新異常: {ex}"
+            finally:
+                loading_bar.visible = False
+                page.update()
+
+        page.run_task(_task)
+
+    # --- 分頁 2：風控持倉（精簡總表 + 個股子分頁切換器，解決頁面過長問題） ---
+    def build_page1_holdings(live_rows: list):
+        page1_holdings_col.controls.clear()
+        headers = ["代號/現價", "股數/均價", "損益%", "權重/上限", "指令"]
         rows = []
         for r in live_rows:
             rows.append([
-                r["Ticker"], r["Shares"], f"${r['Avg_Cost']:.2f}",
-                f"${r['Price']:.2f} ({r['Day_Chg_Pct']:+.1f}%)",
-                f"${r['Market_Value']:,.0f}",
-                f"${r['PnL']:,.0f} ({r['PnL_Pct']:+.1f}%)",
-                f"{r['Weight_Pct']:.1f}%",
-                f"{r['Target_Kelly_Pct']:.1f}% ({r['Optimal_Shares']}股)",
-                f"{r['Share_Diff']:+d} 股",
-                f"${r['Key_Fib_Target']:.2f}",
-                f"${r['Hard_Stop']:.2f}",
-                r["Action_Signal"],
+                f"{r['Ticker']}\n${r['Price']:.2f}",
+                f"{r['Shares']}股\n@${r['Avg_Cost']:.1f}",
+                f"${r['PnL']:,.0f}\n({r['PnL_Pct']:+.1f}%)",
+                f"{r['Weight_Pct']:.1f}%\n(限{r['Target_Kelly_Pct']:.0f}%)",
+                f"{r['Action_Signal']}\n({r['Share_Diff']:+d}股)",
             ])
-        tab1_col.controls.append(make_table_box("互動式風控追蹤總表", headers, rows, "#3182ce"))
+        page1_holdings_col.controls.append(make_table_box("持倉風控總覽表", headers, rows, "#1e3a8a"))
+
+        # 個股子分頁導覽列 (點選切換單一股票編輯卡，還有 [+新增] 頁籤)
+        sub_nav_row = ft.Row(wrap=True, spacing=6)
+        if selected_stock_idx[0] > len(live_rows):
+            selected_stock_idx[0] = 0
+
         for idx, r in enumerate(live_rows):
-            tf_s = ft.TextField(label="股數", value=str(r["Shares"]), width=95)
-            tf_c = ft.TextField(label="均價", value=str(r["Avg_Cost"]), width=115)
-            tf_p = ft.TextField(label="模擬價", value=str(r["Price"]), width=115)
-            tf_k = ft.TextField(label="凱利%", value=str(r["Target_Kelly_Pct"]), width=105)
-            tf_f = ft.TextField(label="費氏目標", value=str(r["Key_Fib_Target"]), width=125)
-            tf_h = ft.TextField(label="停損", value=str(r["Hard_Stop"]), width=125)
+            is_sel = selected_stock_idx[0] == idx
 
-            def make_save_fn(i, s_f, c_f, p_f, k_f, f_f, h_f):
-                def _save(e):
-                    try:
-                        portfolio_data[i]["Shares"] = int(float(s_f.value))
-                        portfolio_data[i]["Avg_Cost"] = float(c_f.value)
-                        portfolio_data[i]["Manual_Price"] = float(p_f.value)
-                        portfolio_data[i]["Target_Kelly_Pct"] = float(k_f.value)
-                        portfolio_data[i]["Key_Fib_Target"] = float(f_f.value)
-                        portfolio_data[i]["Hard_Stop"] = float(h_f.value)
-                    except Exception:
-                        pass
-                    refresh_all(False)
-                return _save
+            def make_sel_stock(i):
+                def _sel(e):
+                    selected_stock_idx[0] = i
+                    build_page1_holdings(live_rows)
+                    page.update()
+                return _sel
 
-            def make_del_fn(i):
-                def _del(e):
-                    if 0 <= i < len(portfolio_data):
-                        portfolio_data.pop(i)
-                        refresh_all(False)
-                return _del
+            sub_nav_row.controls.append(
+                make_btn(
+                    f"{r['Ticker']}",
+                    make_sel_stock(idx),
+                    bg_color="#38a169" if is_sel else "#1e293b",
+                    text_color="#ffffff" if is_sel else "#90cdf4",
+                    pad=8,
+                )
+            )
+
+        is_add_tab = selected_stock_idx[0] == len(live_rows)
+
+        def sel_add_tab(e):
+            selected_stock_idx[0] = len(live_rows)
+            build_page1_holdings(live_rows)
+            page.update()
+
+        sub_nav_row.controls.append(
+            make_btn(
+                "+ 新增股票",
+                sel_add_tab,
+                bg_color="#dd6b20" if is_add_tab else "#1e293b",
+                text_color="#ffffff" if is_add_tab else "#fbd38d",
+                pad=8,
+            )
+        )
+
+        page1_holdings_col.controls.append(
+            ft.Container(
+                bgcolor="#161b26",
+                border_radius=10,
+                padding=10,
+                content=ft.Column([
+                    ft.Text("點選下方股票標籤，切換編輯單一個股參數：", size=12, color="#90cdf4"),
+                    sub_nav_row,
+                ], spacing=6),
+            )
+        )
+
+        # 僅渲染當前選中的那 1 檔股票編輯卡 (或新增股票卡)
+        if not is_add_tab and 0 <= selected_stock_idx[0] < len(live_rows):
+            idx = selected_stock_idx[0]
+            r = live_rows[idx]
+            tf_s = ft.TextField(label="股數", value=str(r["Shares"]), width=105)
+            tf_c = ft.TextField(label="均價($)", value=str(r["Avg_Cost"]), width=115)
+            tf_p = ft.TextField(label="離線價($)", value=str(r["Price"]), width=115)
+            tf_k = ft.TextField(label="凱利(%)", value=str(r["Target_Kelly_Pct"]), width=105)
+            tf_f = ft.TextField(label="費氏目標", value=str(r["Key_Fib_Target"]), width=115)
+            tf_h = ft.TextField(label="停損價", value=str(r["Hard_Stop"]), width=115)
+
+            def _save_cur(e):
+                try:
+                    portfolio_data[idx]["Shares"] = int(float(tf_s.value))
+                    portfolio_data[idx]["Avg_Cost"] = float(tf_c.value)
+                    portfolio_data[idx]["Manual_Price"] = float(tf_p.value)
+                    portfolio_data[idx]["Target_Kelly_Pct"] = float(tf_k.value)
+                    portfolio_data[idx]["Key_Fib_Target"] = float(tf_f.value)
+                    portfolio_data[idx]["Hard_Stop"] = float(tf_h.value)
+                except Exception:
+                    pass
+                refresh_all(force_api=False, use_network=False)
+
+            def _del_cur(e):
+                if 0 <= idx < len(portfolio_data):
+                    portfolio_data.pop(idx)
+                    selected_stock_idx[0] = 0
+                    refresh_all(force_api=False, use_network=False)
 
             pnl_c = "#48bb78" if r["PnL"] >= 0 else "#f56565"
-            tab1_col.controls.append(
+            page1_holdings_col.controls.append(
                 ft.Container(
                     bgcolor="#161b26",
-                    border=safe_border(1, "#2d3748"),
                     border_radius=10,
                     padding=12,
                     content=ft.Column([
-                        ft.Text(f"{r['Ticker']} ({r['Name']}) ${r['Price']:.2f} [{r['Session']}] | {r['Action_Signal']}", size=14, weight=ft.FontWeight.BOLD, color="#ffffff"),
-                        ft.Text(f"損益 ${r['PnL']:,.2f} ({r['PnL_Pct']:+.2f}%) | 權重 {r['Weight_Pct']:.2f}%", size=13, color=pnl_c),
+                        ft.Text(f"編輯 {r['Ticker']} ({r['Name']}) | 現價 ${r['Price']:.2f} [{r['Session']}]", size=14, weight=ft.FontWeight.BOLD, color="#ffffff"),
+                        ft.Text(f"未實現損益: ${r['PnL']:,.2f} ({r['PnL_Pct']:+.2f}%) | 權重: {r['Weight_Pct']:.2f}% | 訊號: {r['Action_Signal']}", size=12, color=pnl_c),
+                        ft.Row([tf_s, tf_c, tf_p, tf_k, tf_f, tf_h], wrap=True, spacing=8),
                         ft.Row([
-                            tf_s, tf_c, tf_p, tf_k, tf_f, tf_h,
-                            make_btn("儲存", make_save_fn(idx, tf_s, tf_c, tf_p, tf_k, tf_f, tf_h), "#2563eb"),
-                            make_btn("刪除", make_del_fn(idx), "#9b2c2c"),
-                        ], wrap=True, spacing=8),
+                            make_btn("💾 儲存修改", _save_cur, "#2563eb", pad=10),
+                            make_btn("🗑️ 刪除此股", _del_cur, "#9b2c2c", pad=10),
+                        ], wrap=True, spacing=10),
+                    ], spacing=8),
+                )
+            )
+        else:
+            new_tkr_tf = ft.TextField(label="美股代號", value="", width=130)
+            new_sh_tf = ft.TextField(label="股數", value="50", width=110)
+            new_cost_tf = ft.TextField(label="均價($)", value="100.0", width=120)
+            new_kelly_tf = ft.TextField(label="凱利(%)", value="15.0", width=120)
+
+            def add_new_stock(e):
+                nt = (new_tkr_tf.value or "").strip().upper()
+                if not nt:
+                    return
+                def_p = float(new_cost_tf.value or 100.0)
+                portfolio_data.append({
+                    "Ticker": nt,
+                    "Name": nt,
+                    "Shares": int(float(new_sh_tf.value or 0)),
+                    "Avg_Cost": def_p,
+                    "Target_Kelly_Pct": float(new_kelly_tf.value or 15.0),
+                    "Hard_Stop": round(def_p * 0.90, 2),
+                    "Key_Fib_Target": round(def_p * 1.15, 2),
+                })
+                selected_stock_idx[0] = len(portfolio_data) - 1
+                refresh_all(force_api=False, use_network=True)
+
+            page1_holdings_col.controls.append(
+                ft.Container(
+                    bgcolor="#152238",
+                    border_radius=10,
+                    padding=12,
+                    content=ft.Column([
+                        ft.Text("新增美股到追蹤主表", size=14, weight=ft.FontWeight.BOLD, color="#63b3ed"),
+                        ft.Row([new_tkr_tf, new_sh_tf, new_cost_tf, new_kelly_tf], wrap=True, spacing=8),
+                        make_btn("➕ 確認加入持倉", add_new_stock, "#38a169", pad=10, width=160),
                     ], spacing=8),
                 )
             )
 
-        new_tkr_tf = ft.TextField(label="新代號", value="", width=170)
-        new_sh_tf = ft.TextField(label="股數", value="50", width=110)
-        new_cost_tf = ft.TextField(label="均價", value="100.0", width=120)
-        new_kelly_tf = ft.TextField(label="凱利%", value="15.0", width=120)
-
-        def add_new_stock(e):
-            nt = (new_tkr_tf.value or "").strip().upper()
-            if not nt:
-                return
-            q_new = fetch_quant_metrics(nt, get_extended=sw_ext.value)
-            def_p = q_new["Price"] if q_new else float(new_cost_tf.value or 100.0)
-            def_atr = q_new["ATR"] if q_new else round(def_p * 0.04, 2)
-            def_fib = q_new["Fib_0618"] if q_new else round(def_p * 1.15, 2)
-            portfolio_data.append({
-                "Ticker": nt,
-                "Name": nt,
-                "Shares": int(float(new_sh_tf.value or 0)),
-                "Avg_Cost": float(new_cost_tf.value or def_p),
-                "Target_Kelly_Pct": float(new_kelly_tf.value or 15.0),
-                "Hard_Stop": round(def_p - 2.0 * def_atr, 2),
-                "Key_Fib_Target": def_fib,
-            })
-            refresh_all(False)
-
-        tab1_col.controls.append(
-            ft.Container(
-                bgcolor="#152238",
-                border=safe_border(1.5, "#3182ce"),
-                border_radius=10,
-                padding=14,
-                content=ft.Column([
-                    ft.Text("新增美股到追蹤主表", size=14, weight=ft.FontWeight.BOLD, color="#63b3ed"),
-                    ft.Row([new_tkr_tf, new_sh_tf, new_cost_tf, new_kelly_tf, make_btn("加入", add_new_stock, "#38a169")], wrap=True, spacing=10),
-                ], spacing=8),
-            )
-        )
-
-    def build_tab2(live_rows: list):
-        tab2_col.controls.clear()
-        weight_bars = []
-        price_ladders = []
+    # --- 分頁 3：費氏時間週期與權重價位階梯 ---
+    def build_page2_ladders(live_rows: list):
+        ladder_col_container.controls.clear()
         for r in live_rows:
             w_pct = r["Weight_Pct"]
             k_pct = r["Target_Kelly_Pct"]
             w_color = "#f56565" if w_pct > k_pct else "#48bb78"
-            weight_bars.append(
-                ft.Container(
-                    bgcolor="#1e2536",
-                    border_radius=8,
-                    padding=10,
-                    content=ft.Column([
-                        ft.Text(f"{r['Ticker']} 權重 {w_pct:.2f}% / 上限 {k_pct:.1f}%", size=13, weight=ft.FontWeight.BOLD, color=w_color),
-                        ft.ProgressBar(value=min(w_pct / 40.0, 1.0), color=w_color, bgcolor="#0e1117"),
-                        ft.ProgressBar(value=min(k_pct / 40.0, 1.0), color="#48bb78", bgcolor="#0e1117"),
-                    ], spacing=5),
-                )
-            )
             cur_p, stop_p, fib_p = r["Price"], r["Hard_Stop"], r["Key_Fib_Target"]
             dist_to_fib = ((fib_p - cur_p) / cur_p * 100.0) if cur_p else 0.0
             dist_to_stop = ((cur_p - stop_p) / cur_p * 100.0) if cur_p else 0.0
-            price_ladders.append(
+            ladder_col_container.controls.append(
                 ft.Container(
-                    bgcolor="#1e2536",
+                    bgcolor="#161b26",
                     border_radius=8,
                     padding=10,
                     content=ft.Column([
-                        ft.Text(f"{r['Ticker']} 停損 ${stop_p:.2f} ({dist_to_stop:+.1f}%) | 現價 ${cur_p:.2f} | 目標 ${fib_p:.2f} ({dist_to_fib:+.1f}%)", size=13, color="#ffffff"),
-                    ]),
+                        ft.Text(f"{r['Ticker']} 權重 {w_pct:.1f}% / 凱利上限 {k_pct:.1f}%", size=13, weight=ft.FontWeight.BOLD, color=w_color),
+                        ft.ProgressBar(value=min(w_pct / 40.0, 1.0), color=w_color, bgcolor="#0e1117"),
+                        ft.Text(f"停損 ${stop_p:.2f} ({dist_to_stop:+.1f}%) | 現價 ${cur_p:.2f} | 費氏目標 ${fib_p:.2f} ({dist_to_fib:+.1f}%)", size=12, color="#e2e8f0"),
+                    ], spacing=5),
                 )
             )
-        tab2_col.controls.append(
-            ft.Column([
-                ft.Text("權重 vs 半凱利上限", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
-                ft.Column(weight_bars, spacing=8),
-                ft.Text("現價 / 停損 / 費氏目標", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
-                ft.Column(price_ladders, spacing=8),
-            ], spacing=10)
-        )
 
-    def build_tab3(live_rows: list):
-        tab3_col.controls.clear()
-        nbis_r = next((x for x in live_rows if x["Ticker"] == "NBIS"), None)
-        mrvl_r = next((x for x in live_rows if x["Ticker"] == "MRVL"), None)
-        nbis_p = nbis_r["Price"] if nbis_r else 171.45
-        nbis_sh = nbis_r["Shares"] if nbis_r else 550
-        mrvl_p = mrvl_r["Price"] if mrvl_r else 235.00
-        mrvl_sh = mrvl_r["Shares"] if mrvl_r else 350
-        tab3_col.controls.append(ft.Text("NBIS 與 MRVL 三階梯減碼試算", size=16, weight=ft.FontWeight.BOLD, color="#f7fafc"))
-        tab3_col.controls.append(make_table_box(
-            f"NBIS (現有 {nbis_sh} 股 | ${nbis_p:.2f})",
-            ["階段", "掛單價", "股數", "收回現金"],
-            [
-                ["第一階", "$195.80", "87", f"${87 * 195.80:,.2f}"],
-                ["第二階", "$200.00", "80", f"${80 * 200.00:,.2f}"],
-                ["第三階", "$215.50", "50", f"${50 * 215.50:,.2f}"],
-                ["破位", "$159.00", "100", f"${100 * 159.00:,.2f}"],
-            ],
-            "#3182ce",
-        ))
-        tab3_col.controls.append(make_table_box(
-            f"MRVL (現有 {mrvl_sh} 股 | ${mrvl_p:.2f})",
-            ["階段", "掛單價", "股數", "收回現金"],
-            [
-                ["第一階", "$247.77", "57", f"${57 * 247.77:,.2f}"],
-                ["第二階", "$256.00", "60", f"${60 * 256.00:,.2f}"],
-                ["第三階", "$272.50", "53", f"${53 * 272.50:,.2f}"],
-                ["破位", "$218.00", "60", f"${60 * 218.00:,.2f}"],
-            ],
-            "#ecc94b",
-        ))
-
-    def build_tab4(live_rows: list, total_portfolio_equity: float, cash_pool: float):
-        tab4_col.controls.clear()
+    # --- 分頁 4：個股加減碼與補倉保本均價試算 ---
+    def build_page3_calc(live_rows: list, total_portfolio_equity: float, cash_pool: float):
+        page3_calc_col.controls.clear()
         chip_buttons = []
         for r in live_rows:
             def make_chip_fn(row_data):
@@ -698,14 +729,15 @@ async def _build(page: ft.Page):
                     t4_kelly_tf.value = str(row_data["Target_Kelly_Pct"])
                     run_tab4_engine()
                 return _sel
-            chip_buttons.append(make_btn(r["Ticker"], make_chip_fn(r), "#1e293b", "#90cdf4", pad_v=6, pad_h=10, border_col="#3182ce"))
+            chip_buttons.append(make_btn(r["Ticker"], make_chip_fn(r), "#1e293b", "#90cdf4", pad=8))
 
         def run_tab4_engine(e=None):
             t4_result_col.controls.clear()
             target_ticker = (t4_ticker_tf.value or "").strip().upper()
             if not target_ticker:
                 return
-            q_data = fetch_quant_metrics(target_ticker, get_extended=sw_ext.value)
+            matched = next((x for x in live_rows if x["Ticker"] == target_ticker), None)
+            q_data = QUOTE_CACHE.get(f"{target_ticker}_{sw_ext.value}")
             try:
                 sim_cur_shares = int(float(t4_shares_tf.value or 0))
             except Exception:
@@ -723,17 +755,39 @@ async def _build(page: ft.Page):
             except Exception:
                 budget_limit = cash_pool
 
-            live_p = q_data["Price"] if q_data else (sim_cur_cost if sim_cur_cost > 0 else 100.0)
+            if matched:
+                live_p = matched["Price"]
+                live_atr = matched["ATR"]
+                live_ma20 = matched["MA20"]
+                live_rsi = matched["RSI"]
+                swing_low = matched["Swing_Low"]
+                fib_236_lvl = matched["Fib_0236"]
+                fib_382_lvl = matched["Fib_0382"]
+                fib_618_lvl = matched["Fib_0618"]
+                fib_1272_lvl = matched["Fib_1272"]
+            elif q_data:
+                live_p = q_data["Price"]
+                live_atr = q_data["ATR"]
+                live_ma20 = q_data["MA20"]
+                live_rsi = q_data["RSI"]
+                swing_low = q_data["Swing_Low"]
+                fib_236_lvl = q_data["Fib_0236"]
+                fib_382_lvl = q_data["Fib_0382"]
+                fib_618_lvl = q_data["Fib_0618"]
+                fib_1272_lvl = q_data["Fib_1272"]
+            else:
+                live_p = sim_cur_cost if sim_cur_cost > 0 else 100.0
+                live_atr = round(live_p * 0.04, 2)
+                live_ma20 = live_p
+                live_rsi = 50.0
+                swing_low = round(live_p * 0.88, 2)
+                fib_236_lvl = round(live_p * 0.93, 2)
+                fib_382_lvl = round(live_p * 0.96, 2)
+                fib_618_lvl = round(live_p * 1.08, 2)
+                fib_1272_lvl = round(live_p * 1.20, 2)
+
             if sim_cur_cost <= 0:
                 sim_cur_cost = live_p
-            live_atr = q_data["ATR"] if q_data else round(live_p * 0.04, 2)
-            live_ma20 = q_data["MA20"] if q_data else live_p
-            live_rsi = q_data["RSI"] if q_data else 50.0
-            swing_low = q_data["Swing_Low"] if q_data else round(live_p * 0.88, 2)
-            fib_236_lvl = q_data["Fib_0236"] if q_data else round(live_p * 0.93, 2)
-            fib_382_lvl = q_data["Fib_0382"] if q_data else round(live_p * 0.96, 2)
-            fib_618_lvl = q_data["Fib_0618"] if q_data else round(live_p * 1.08, 2)
-            fib_1272_lvl = q_data["Fib_1272"] if q_data else round(live_p * 1.20, 2)
 
             cur_invested_cost = round(sim_cur_shares * sim_cur_cost, 2)
             cur_mkt_val = round(sim_cur_shares * live_p, 2)
@@ -744,7 +798,7 @@ async def _build(page: ft.Page):
             effective_add_budget = min(remaining_kelly_val, budget_limit) if remaining_kelly_val > 0 else 0.0
 
             t4_result_col.controls.append(ft.Text(
-                f"{target_ticker} 現價 ${live_p:.2f} | 目前權重 {cur_weight_pct:.1f}% / 凱利上限 {sim_kelly_pct:.1f}% ({max_kelly_shares}股) | RSI {live_rsi:.1f} | ATR ${live_atr:.2f} | 20MA ${live_ma20:.2f}",
+                f"{target_ticker} 現價 ${live_p:.2f} | 權重 {cur_weight_pct:.1f}% / 上限 {sim_kelly_pct:.1f}% ({max_kelly_shares}股) | RSI {live_rsi:.1f} | ATR ${live_atr:.2f}",
                 color="white",
                 size=13,
                 weight=ft.FontWeight.BOLD,
@@ -752,14 +806,13 @@ async def _build(page: ft.Page):
 
             if cur_weight_pct >= sim_kelly_pct:
                 t4_result_col.controls.append(
-                    ft.Text("目前權重已達或超過半凱利上限，禁止向下攤平！建議優先執行反彈階梯減碼。", color="#fc8181", size=13, weight=ft.FontWeight.BOLD)
+                    ft.Text("目前權重已超過半凱利上限，禁止向下攤平！建議優先執行反彈階梯減碼。", color="#fc8181", size=12, weight=ft.FontWeight.BOLD)
                 )
             else:
                 t4_result_col.controls.append(
-                    ft.Text(f"風控允許尚可加碼額度：${effective_add_budget:,.2f} (取剩餘凱利空間與預算上限之較小值)", color="#68d391", size=13)
+                    ft.Text(f"風控允許尚可加碼額度：${effective_add_budget:,.2f}", color="#68d391", size=12)
                 )
 
-            # --- 兩批加碼與補倉後最終保本均價試算 (徹底修復原 KeyError 並防呆) ---
             buy_p1 = round(live_p, 2)
             buy_p2 = round(max(live_p - 1.0 * live_atr, swing_low, live_p * 0.92), 2)
 
@@ -781,75 +834,86 @@ async def _build(page: ft.Page):
             )
             hard_stop_price = round(buy_p2 - 1.5 * live_atr, 2)
 
-            addon_headers = ["批次階段", "建議買價", "加碼股數", "動用資金", "累計總股數", "補倉後最終保本均價"]
+            addon_headers = ["階段", "買價", "股數", "動用資金", "補倉後保本均價"]
             addon_rows = [
-                ["原持倉基準", f"${sim_cur_cost:.2f}", f"{sim_cur_shares} 股", f"投入成本 ${cur_invested_cost:,.0f}", f"{sim_cur_shares} 股", f"${sim_cur_cost:.2f}"],
-                ["第一批 (40%資金/右側現價)", f"${buy_p1:.2f}", f"+{b1_shares} 股", f"${b1_fund:,.2f}", f"{after_b1_shares} 股", f"${after_b1_avg:.2f}"],
-                ["第二批 (60%資金/回測1xATR)", f"${buy_p2:.2f}", f"+{b2_shares} 股", f"${b2_fund:,.2f}", f"{final_total_shares} 股", f"${final_breakeven_avg:.2f}"],
-                ["兩批合計總結", "-", f"+{b1_shares + b2_shares} 股", f"合計 ${total_addon_fund:,.2f}", f"{final_total_shares} 股", f"最終保本 ${final_breakeven_avg:.2f}"],
+                ["原持倉", f"${sim_cur_cost:.2f}", f"{sim_cur_shares}股", f"${cur_invested_cost:,.0f}", f"${sim_cur_cost:.2f}"],
+                ["第一批40%", f"${buy_p1:.2f}", f"+{b1_shares}股", f"${b1_fund:,.0f}", f"${after_b1_avg:.2f}"],
+                ["第二批60%", f"${buy_p2:.2f}", f"+{b2_shares}股", f"${b2_fund:,.0f}", f"${final_breakeven_avg:.2f}"],
+                ["合計總結", "-", f"共{final_total_shares}股", f"${total_addon_fund:,.0f}", f"保本 ${final_breakeven_avg:.2f}"],
             ]
             t4_result_col.controls.append(
-                make_table_box(f"{target_ticker} 兩批分批加碼與補倉保本均價試算表", addon_headers, addon_rows, "#38a169")
+                make_table_box(f"{target_ticker} 兩批加碼與補倉保本均價試算", addon_headers, addon_rows, "#22543d")
             )
 
-            trim_headers = ["費氏目標區間", "目標參考價", "建議調節比例", "預估減碼股數", "預計回收現金"]
+            trim_headers = ["費氏區間", "目標價", "比例", "減碼股數", "回收現金"]
             s_236 = int(math.floor(final_total_shares * 0.25))
             s_382 = int(math.floor(final_total_shares * 0.25))
             s_618 = int(math.floor(final_total_shares * 0.25))
             s_1272 = max(0, final_total_shares - s_236 - s_382 - s_618)
             trim_rows = [
-                ["Fib 0.236 (短線初步反彈)", f"${fib_236_lvl:.2f}", "25%", f"{s_236} 股", f"${s_236 * fib_236_lvl:,.2f}"],
-                ["Fib 0.382 (波段第一強壓)", f"${fib_382_lvl:.2f}", "25%", f"{s_382} 股", f"${s_382 * fib_382_lvl:,.2f}"],
-                ["Fib 0.618 (黃金分割重壓)", f"${fib_618_lvl:.2f}", "25%", f"{s_618} 股", f"${s_618 * fib_618_lvl:,.2f}"],
-                ["Fib 1.272 (波段擴散目標)", f"${fib_1272_lvl:.2f}", "25%", f"{s_1272} 股", f"${s_1272 * fib_1272_lvl:,.2f}"],
-                ["ATR 硬性破位停損線", f"${hard_stop_price:.2f}", "破位強制風控", "-", "跌破無條件停損/減碼"],
+                ["Fib 0.236", f"${fib_236_lvl:.2f}", "25%", f"{s_236}股", f"${s_236 * fib_236_lvl:,.0f}"],
+                ["Fib 0.382", f"${fib_382_lvl:.2f}", "25%", f"{s_382}股", f"${s_382 * fib_382_lvl:,.0f}"],
+                ["Fib 0.618", f"${fib_618_lvl:.2f}", "25%", f"{s_618}股", f"${s_618 * fib_618_lvl:,.0f}"],
+                ["Fib 1.272", f"${fib_1272_lvl:.2f}", "25%", f"{s_1272}股", f"${s_1272 * fib_1272_lvl:,.0f}"],
+                ["ATR 停損", f"${hard_stop_price:.2f}", "破位", "強制風控", "跌破無條件減碼"],
             ]
             t4_result_col.controls.append(
-                make_table_box(f"{target_ticker} 費波納契階梯減碼與停損目標表", trim_headers, trim_rows, "#3182ce")
+                make_table_box(f"{target_ticker} 費波納契階梯減碼與停損表", trim_headers, trim_rows, "#1e3a8a")
             )
             page.update()
 
-        tab4_col.controls.append(
+        page3_calc_col.controls.append(
             ft.Container(
                 bgcolor="#161b26",
-                border=safe_border(1, "#2d3748"),
                 border_radius=12,
-                padding=14,
+                padding=12,
                 content=ft.Column([
-                    ft.Text("個股加減碼與補倉保本均價試算", size=15, weight=ft.FontWeight.BOLD, color="#f7fafc"),
+                    ft.Text("點選持股快速帶入試算：", size=13, weight=ft.FontWeight.BOLD, color="#f7fafc"),
                     ft.Row(chip_buttons, wrap=True, spacing=6),
-                    ft.Row([t4_ticker_tf, t4_shares_tf, t4_cost_tf, t4_kelly_tf, t4_budget_tf, make_btn("試算", run_tab4_engine, "#2563eb")], wrap=True, spacing=10),
-                ], spacing=10),
+                    ft.Row([t4_ticker_tf, t4_shares_tf, t4_cost_tf, t4_kelly_tf, t4_budget_tf], wrap=True, spacing=8),
+                    make_btn("🧮 立即計算補倉保本均價", run_tab4_engine, "#2563eb", pad=10, width=220),
+                ], spacing=8),
             )
         )
-        tab4_col.controls.append(t4_result_col)
+        page3_calc_col.controls.append(t4_result_col)
         run_tab4_engine()
 
-    tab_titles = ["風控主表", "權重與價位", "NBIS/MRVL 減碼", "加減碼試算"]
+    # --- 分頁 5：NBIS 與 MRVL 三階梯減碼專區 ---
+    def build_page4_trim(live_rows: list):
+        page4_trim_col.controls.clear()
+        nbis_r = next((x for x in live_rows if x["Ticker"] == "NBIS"), None)
+        mrvl_r = next((x for x in live_rows if x["Ticker"] == "MRVL"), None)
+        nbis_p = nbis_r["Price"] if nbis_r else 171.45
+        nbis_sh = nbis_r["Shares"] if nbis_r else 550
+        mrvl_p = mrvl_r["Price"] if mrvl_r else 235.00
+        mrvl_sh = mrvl_r["Shares"] if mrvl_r else 350
+        page4_trim_col.controls.append(make_table_box(
+            f"NBIS 三階減碼表 (現有 {nbis_sh} 股 | 現價 ${nbis_p:.2f})",
+            ["階段", "掛單價", "股數", "收回現金"],
+            [
+                ["第一階", "$195.80", "87股", f"${87 * 195.80:,.0f}"],
+                ["第二階", "$200.00", "80股", f"${80 * 200.00:,.0f}"],
+                ["第三階", "$215.50", "50股", f"${50 * 215.50:,.0f}"],
+                ["破位防線", "$159.00", "100股", f"${100 * 159.00:,.0f}"],
+            ],
+            "#1e3a8a",
+        ))
+        page4_trim_col.controls.append(make_table_box(
+            f"MRVL 三階減碼表 (現有 {mrvl_sh} 股 | 現價 ${mrvl_p:.2f})",
+            ["階段", "掛單價", "股數", "收回現金"],
+            [
+                ["第一階", "$247.77", "57股", f"${57 * 247.77:,.0f}"],
+                ["第二階", "$256.00", "60股", f"${60 * 256.00:,.0f}"],
+                ["第三階", "$272.50", "53股", f"${53 * 272.50:,.0f}"],
+                ["破位防線", "$218.00", "60股", f"${60 * 218.00:,.0f}"],
+            ],
+            "#744210",
+        ))
 
-    def render_tab_nav():
-        tab_nav_row.controls.clear()
-        for idx, t_label in enumerate(tab_titles):
-            is_act = active_tab_idx[0] == idx
-            def make_switch_fn(i):
-                def _sw(e):
-                    active_tab_idx[0] = i
-                    tab1_col.visible = i == 0
-                    tab2_col.visible = i == 1
-                    tab3_col.visible = i == 2
-                    tab4_col.visible = i == 3
-                    render_tab_nav()
-                    page.update()
-                return _sw
-            tab_nav_row.controls.append(
-                make_btn(
-                    t_label,
-                    make_switch_fn(idx),
-                    "#1e3a8a" if is_act else "#161b26",
-                    "#60a5fa" if is_act else "#a0aec0",
-                    border_col="#3b82f6" if is_act else "#2d3748",
-                )
-            )
+    def set_quick_anchor(dt_str: str):
+        tf_anchor_date.value = dt_str
+        render_time_zones()
+        page.update()
 
     def reset_defaults(e):
         portfolio_data.clear()
@@ -860,46 +924,78 @@ async def _build(page: ft.Page):
         tf_tax.value = "-3461.52"
         tf_shock.value = "0"
         tf_beta.value = "1.50"
-        refresh_all(True)
+        refresh_all(force_api=True, use_network=True)
 
-    render_tab_nav()
+    # 組裝分頁 1 (總覽與設定)
+    page0_overview_col.controls.extend([
+        kpi_grid_container,
+        ft.Container(
+            bgcolor="#161b26",
+            border_radius=12,
+            padding=12,
+            content=ft.Column([
+                ft.Text("全域資金與大盤壓力測試設定", size=14, weight=ft.FontWeight.BOLD, color="#90cdf4"),
+                ft.Row([sw_live, sw_ext], wrap=True, spacing=10),
+                ft.Row([tf_cash, tf_tax, tf_shock, tf_beta], wrap=True, spacing=8),
+                ft.Row([
+                    make_btn("⚡ 套用並重算", lambda e: refresh_all(False, False), "#38a169", pad=10),
+                    make_btn("🔄 聯網更新報價", lambda e: refresh_all(True, True), "#2563eb", pad=10),
+                    make_btn("↩️ 重置預設", reset_defaults, "#4a5568", pad=10),
+                ], wrap=True, spacing=8),
+            ], spacing=8),
+        ),
+    ])
+
+    # 組裝分頁 3 (費氏週期與階梯)
+    page2_fib_col.controls.extend([
+        ft.Container(
+            bgcolor="#161b26",
+            border_radius=12,
+            padding=12,
+            content=ft.Column([
+                tz_header_text,
+                ft.Row([
+                    tf_anchor_date,
+                    sw_trading_days,
+                    make_btn("設為 10/16", lambda e: set_quick_anchor("2026-10-16"), "#1e293b", "#90cdf4", pad=8),
+                    make_btn("設為今天", lambda e: set_quick_anchor(datetime.date.today().strftime("%Y-%m-%d")), "#1e293b", "#fbd38d", pad=8),
+                ], wrap=True, spacing=8),
+                tz_row_container,
+            ], spacing=8),
+        ),
+        ft.Text("各股權重上限與停損/目標價位階梯", size=14, weight=ft.FontWeight.BOLD, color="#f7fafc"),
+        ladder_col_container,
+    ])
+
+    render_main_nav()
     page.controls.clear()
     page.add(
         ft.Container(
             bgcolor="#161b26",
-            border=safe_border(1, "#2d3748"),
-            border_radius=12,
-            padding=16,
+            border_radius=10,
+            padding=10,
             content=ft.Column([
-                ft.Text("美股量化風控 x 費波納契 x 半凱利", size=22, weight=ft.FontWeight.BOLD, color="#ffffff"),
-                ft.Text("純 Python 核心 (零 pandas/numpy 依賴)，完美相容 Android / 桌面端與新版 Flet。", size=12, color="#a0aec0"),
+                ft.Row([
+                    ft.Text("美股量化風控 × 費氏 × 半凱利", size=17, weight=ft.FontWeight.BOLD, color="#ffffff"),
+                    status_text,
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 loading_bar,
-                ft.Row([
-                    sw_live, sw_ext, tf_cash, tf_tax, tf_shock, tf_beta,
-                    make_btn("套用並重算", lambda e: refresh_all(False), "#38a169"),
-                    make_btn("更新報價", lambda e: refresh_all(True), "#2563eb"),
-                    make_btn("重置", reset_defaults, "#4a5568"),
-                ], wrap=True, spacing=12),
-                ft.Row([
-                    tf_anchor_date,
-                    sw_trading_days,
-                    make_btn("10/16", lambda e: set_quick_anchor("2026-10-16"), "#1e293b", "#90cdf4", border_col="#3182ce"),
-                    make_btn("今天", lambda e: set_quick_anchor(datetime.date.today().strftime("%Y-%m-%d")), "#1e293b", "#fbd38d", border_col="#dd6b20"),
-                ], wrap=True, spacing=10),
-            ], spacing=8),
+                main_nav_row,
+            ], spacing=6),
         ),
-        kpi_row_container,
-        tz_header_text,
-        tz_row_container,
-        tab_nav_row,
-        tab1_col,
-        tab2_col,
-        tab3_col,
-        tab4_col,
+        page0_overview_col,
+        page1_holdings_col,
+        page2_fib_col,
+        page3_calc_col,
+        page4_trim_col,
     )
-    page.update()
-    await asyncio.sleep(0)
-    refresh_all(False)
+
+    # 第一步：先用離線預設值在 0.01 秒內瞬間渲染所有分頁，保證畫面秒開不卡死
+    init_res = compute_rows(use_network=False, force_api=False)
+    update_ui_from_rows(*init_res)
+
+    # 第二步：背景非阻塞抓取即時報價
+    refresh_all(force_api=False, use_network=True)
 
 
 if __name__ == "__main__":
