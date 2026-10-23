@@ -3,12 +3,27 @@ import datetime
 import json
 import math
 import random
+import ssl
 import urllib.request
 import flet as ft
 
 
+# 解決 Android serious_python 找不到系統 CA 憑證導致 HTTPS 永遠連線失敗的問題
+def _make_ssl_ctx():
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    except Exception:
+        return None
+
+
+SSL_CTX = _make_ssl_ctx()
+
+
 class _YFTicker:
-    """三層報價架構：第一層 query1 -> 第二層 query2 無縫備援 -> 第三層由外層接手離線降級"""
+    """多層報價架構：Yahoo Q1主線 -> Yahoo Q2備援 -> Stooq獨立美股備援 -> 外層離線降級"""
 
     def __init__(self, symbol, include_prepost: bool = True):
         self.symbol = symbol.strip().upper()
@@ -23,17 +38,18 @@ class _YFTicker:
 
         prepost_str = "true" if include_prepost else "false"
         hosts = [
-            ("query1.finance.yahoo.com", "Q1主線"),
-            ("query2.finance.yahoo.com", "Q2備援"),
+            ("query1.finance.yahoo.com", "Q1"),
+            ("query2.finance.yahoo.com", "Q2"),
         ]
         headers = {
             "User-Agent": (
-                "Mozilla/5.0 (Linux; Android 14; Mobile) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             ),
-            "Accept": "application/json",
+            "Accept": "*/*",
         }
 
+        # 第一、二層：Yahoo Q1 / Q2 (附帶免驗證 SSL_CTX 打通 Android HTTPS)
         for host, node_lbl in hosts:
             try:
                 url = (
@@ -41,7 +57,7 @@ class _YFTicker:
                     f"{self.symbol}?interval=1d&range=1y&includePrePost={prepost_str}"
                 )
                 req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=4) as resp:
+                with urllib.request.urlopen(req, timeout=7, context=SSL_CTX) as resp:
                     r = json.loads(resp.read().decode("utf-8"))
                 res = r.get("chart", {}).get("result", [])
                 if res:
@@ -85,12 +101,41 @@ class _YFTicker:
                                 self.session_label = f"盤中({node_lbl})"
                         break
             except Exception:
-                # 第一層 Q1 若遇 HTTP 403/429 或逾時，清空殘留並自動切換第二層 Q2
                 self.closes.clear()
                 self.highs.clear()
                 self.lows.clear()
                 self.dates.clear()
                 continue
+
+        # 異質備援層：若 Yahoo Q1/Q2 皆被阻擋，自動改抓 Stooq 美股日線 CSV
+        if not self.fetch_ok:
+            try:
+                stooq_url = f"https://stooq.com/q/d/l/?s={self.symbol.lower()}.us&i=d"
+                req = urllib.request.Request(stooq_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=7, context=SSL_CTX) as resp:
+                    csv_text = resp.read().decode("utf-8", errors="ignore")
+                lines = [ln.strip() for ln in csv_text.splitlines() if ln.strip()]
+                if len(lines) > 5 and "Date,Open,High,Low,Close" in lines[0]:
+                    for ln in lines[1:][-252:]:
+                        parts = ln.split(",")
+                        if len(parts) >= 5:
+                            dt = datetime.datetime.strptime(parts[0], "%Y-%m-%d").date()
+                            h = float(parts[2])
+                            l = float(parts[3])
+                            c = float(parts[4])
+                            self.dates.append(dt)
+                            self.highs.append(h)
+                            self.lows.append(l)
+                            self.closes.append(c)
+                    if len(self.closes) >= 2:
+                        self.fetch_ok = True
+                        self.source_node = "Stooq備援"
+                        self.session_label = "收盤(Stooq)"
+            except Exception:
+                self.closes.clear()
+                self.highs.clear()
+                self.lows.clear()
+                self.dates.clear()
 
 
 class _YFModule:
@@ -100,7 +145,6 @@ class _YFModule:
 yf = _YFModule()
 
 
-# 已更新 MU 過期的停損與目標價，使其符合現價合理區間
 DEFAULT_PORTFOLIO = [
     {"Ticker": "NBIS", "Name": "Nebius Group", "Shares": 550, "Avg_Cost": 226.215, "Target_Kelly_Pct": 15.0, "Hard_Stop": 159.00, "Key_Fib_Target": 245.00, "Is_Semi_AI": True},
     {"Ticker": "MRVL", "Name": "Marvell Tech", "Shares": 350, "Avg_Cost": 255.965, "Target_Kelly_Pct": 15.0, "Hard_Stop": 218.00, "Key_Fib_Target": 272.50, "Is_Semi_AI": True},
@@ -134,7 +178,7 @@ def add_us_trading_days(start_date: datetime.date, trading_days: int) -> datetim
     return cur_dt
 
 
-# --- 零崩潰 UI 元件 (全面停用 ft.ProgressBar 與 ft.padding 模組，杜絕 Android 灰塊) ---
+# --- 零崩潰 UI 元件 ---
 def make_btn(text: str, on_click_fn, bg_color: str = "#2563eb", text_color: str = "#ffffff", pad: int = 7, width: int = None, expand: int = None, size: int = 11):
     return ft.Container(
         content=ft.Text(
@@ -162,7 +206,6 @@ def make_grid_rows(items: list, cols: int = 2, spacing: int = 5) -> list:
 
 
 def make_safe_bar(fill_pct: float, fill_color: str = "#48bb78", bg_color: str = "#0e1117", limit_pct: float = None):
-    """以純 Container 比例色塊取代 ft.ProgressBar，並標示生效凱利上限位置"""
     clamped = max(2, min(98, int(round(fill_pct))))
     rem = max(2, 100 - clamped)
     if limit_pct is not None and 0 < limit_pct < 100:
@@ -199,7 +242,6 @@ def make_safe_bar(fill_pct: float, fill_color: str = "#48bb78", bg_color: str = 
 
 
 def make_ladder_ruler(cur_p: float, stop_p: float, fib_p: float, is_extended: bool = False):
-    """已正規化的停損/現價/目標價位量尺條，妥善處理破底、達標與超漲延伸狀態"""
     if cur_p <= stop_p:
         return ft.Container(
             bgcolor="#9b2c2c",
@@ -306,10 +348,6 @@ def _pearson_corr(xs: list, ys: list) -> float:
 
 
 def pick_next_fib_target_info(cur_p: float, q: dict):
-    """
-    依序由 0.5 -> 0.618 -> 1.0(前高) -> 1.272 -> 1.618 動態挑選現價上方最近一道目標關卡；
-    若現價已突破所有關卡，回傳 (現價, '已延伸(超漲突破)', True)，改採移動停損與減碼模式。
-    """
     ordered_levels = [
         ("Fib 0.500", q.get("Fib_0500", 0)),
         ("Fib 0.618", q.get("Fib_0618", 0)),
@@ -320,7 +358,6 @@ def pick_next_fib_target_info(cur_p: float, q: dict):
     for label, lvl in ordered_levels:
         if lvl >= cur_p * 1.01:
             return round(lvl, 2), label, False
-    # 全部關卡皆在現價下方 -> 進入「已延伸」狀態
     return round(cur_p, 2), "🔥 已延伸 (突破1.618，改採移動停損/減碼)", True
 
 
@@ -457,7 +494,6 @@ def fetch_quant_metrics(ticker: str, get_extended: bool = True, force_refresh: b
 
 
 def make_fallback_metrics(raw_price: float, sess_lbl: str = "離線預設"):
-    """第三層：當網路斷線或 Yahoo Q1/Q2 均異常時，自動接手之離線估算模型"""
     swing_high = round(raw_price * 1.22, 2)
     swing_low = round(raw_price * 0.85, 2)
     diff = max(swing_high - swing_low, 0.01)
@@ -498,11 +534,9 @@ def make_fallback_metrics(raw_price: float, sess_lbl: str = "離線預設"):
 
 
 def compute_dynamic_kelly(price: float, hard_stop: float, fib_target: float, atr: float, rsi: float, trend_str: str, is_extended: bool = False) -> float:
-    """模型估算凱利公式 f* = (b*p - q)/b (回傳全凱利 1.0x 基準百分比)"""
     if price <= 0:
         return 15.0
     if is_extended:
-        # 若已處於突破 1.618 之超漲延伸區，壓低模型凱利建議值以防追高
         return 12.0
     eff_target = fib_target if fib_target > price * 1.01 else price + 1.8 * atr
     eff_stop = hard_stop if hard_stop < price * 0.99 else price - 1.2 * atr
@@ -539,6 +573,7 @@ async def main(page: ft.Page):
         await _build(page)
     except Exception as e:
         import traceback
+        page.add(ft.Container(height=34))
         page.add(ft.Text(f"啟動錯誤: {e}", color="#fc8181", size=14, selectable=True))
         page.add(ft.Text(traceback.format_exc(), size=11, color="#e2e8f0", selectable=True))
         page.update()
@@ -549,7 +584,7 @@ async def _build(page: ft.Page):
     active_page_idx = [0]        # 6 大主分頁 (0~5)
     kelly_mode = ["half"]        # "half" (半凱利 0.5x) 或 "full" (全凱利 1.0x)
     kelly_source = ["min_cap"]   # "min_cap" (取min保守值), "dynamic" (模型凱利), "manual" (手設上限)
-    special_stress = ["none"]    # "none", "top2_atr" (前2大跌1xATR), "semi_15" (半導體籃同跌15%)
+    special_stress = ["none"]    # "none", "top2_atr", "semi_15"
 
     page0_sub_tab = [0]          # 分頁 1: 0=資金設定, 1=壓力測試, 2=組合MC
     page1_sub_mode = [0]         # 分頁 2: 0=總表, 1=圖表, 2=編輯/新增
@@ -557,7 +592,7 @@ async def _build(page: ft.Page):
     page2_fib_stock_idx = [0]    # 分頁 3 選中個股
     page3_calc_sub_tab = [0]     # 分頁 4: 0=兩批加碼保本, 1=費氏階梯減碼, 2=技術與回撤
     page5_sub_tab = [0]          # 分頁 6: 0=技術/費氏, 1=專屬週期, 2=部位試算, 3=單股MC
-    mc_drift_mode = ["trend"]    # "trend" (歷史趨勢) 或 "zero" (0漂移隨機漫步)
+    mc_drift_mode = ["trend"]    # "trend" 或 "zero"
 
     sw_live = ft.Switch(label="自動抓報價", value=True)
     sw_ext = ft.Switch(label="含盤前盤後", value=True)
@@ -570,12 +605,12 @@ async def _build(page: ft.Page):
     status_text = ft.Text("✅ 就緒", size=11, color="#68d391", weight=ft.FontWeight.BOLD)
 
     main_nav_col = ft.Column(spacing=4)
-    page0_overview_col = ft.Column(spacing=7, visible=True)    # 1. 總覽
-    page1_holdings_col = ft.Column(spacing=7, visible=False)   # 2. 持倉
-    page2_fib_col = ft.Column(spacing=7, visible=False)        # 3. 費氏
-    page3_calc_col = ft.Column(spacing=7, visible=False)       # 4. 加減碼
-    page4_trim_col = ft.Column(spacing=7, visible=False)       # 5. 雙核
-    page5_research_col = ft.Column(spacing=7, visible=False)   # 6. 研究
+    page0_overview_col = ft.Column(spacing=7, visible=True)
+    page1_holdings_col = ft.Column(spacing=7, visible=False)
+    page2_fib_col = ft.Column(spacing=7, visible=False)
+    page3_calc_col = ft.Column(spacing=7, visible=False)
+    page4_trim_col = ft.Column(spacing=7, visible=False)
+    page5_research_col = ft.Column(spacing=7, visible=False)
 
     kpi_grid_col = ft.Column(spacing=5)
     mc_portfolio_result_col = ft.Column(spacing=5)
@@ -646,6 +681,7 @@ async def _build(page: ft.Page):
         raw_rows = []
         any_network_success = False
         any_fallback_used = False
+        active_node_name = "Q1"
 
         for item in portfolio_data:
             tkr = str(item["Ticker"]).strip().upper()
@@ -656,11 +692,15 @@ async def _build(page: ft.Page):
                 q = fetch_quant_metrics(tkr, get_extended=sw_ext.value, force_refresh=force_api)
                 if q and not q.get("Is_Fallback", False):
                     any_network_success = True
+                    active_node_name = q.get("Source_Node", "Q1")
                 else:
                     any_fallback_used = True
             elif sw_live.value:
                 cache_key = f"{tkr}_{sw_ext.value}"
                 q = QUOTE_CACHE.get(cache_key)
+                if q and not q.get("Is_Fallback", False):
+                    any_network_success = True
+                    active_node_name = q.get("Source_Node", "快取")
 
             if not q:
                 fallback_p = float(item.get("Manual_Price", item.get("Avg_Cost", 100.0)))
@@ -714,7 +754,6 @@ async def _build(page: ft.Page):
             pnl = round(mkt_val - cost_val, 2)
             pnl_pct = round((pnl / cost_val) * 100.0, 2) if cost_val > 0 else 0.0
 
-            # 凱利三層設計：模型凱利 / 手設上限 / 生效上限取 min()
             formula_full_k = compute_dynamic_kelly(
                 sim_price, r["Hard_Stop"], r["Key_Fib_Target"], r["ATR"], r["RSI"], r["Trend_Diag"], r["Is_Extended"]
             )
@@ -778,7 +817,6 @@ async def _build(page: ft.Page):
             else:
                 r["Action_Signal"] = "紀律續抱"
 
-        # 簡化近似相關係數 VaR 估值
         n_pos = len(live_rows)
         indiv_vars = [r["Shares"] * r["ATR"] * 1.645 * 0.75 for r in live_rows]
         if n_pos >= 2:
@@ -811,6 +849,7 @@ async def _build(page: ft.Page):
             avg_corr,
             any_network_success,
             any_fallback_used,
+            active_node_name,
         )
 
     def update_ui_from_rows(
@@ -825,6 +864,7 @@ async def _build(page: ft.Page):
         avg_corr,
         any_network_success=True,
         any_fallback_used=False,
+        active_node_name="Q1",
     ):
         sorted_w = sorted([r["Weight_Pct"] for r in live_rows], reverse=True)
         top2_conc = sum(sorted_w[:2]) if len(sorted_w) >= 2 else sum(sorted_w)
@@ -874,7 +914,7 @@ async def _build(page: ft.Page):
 
     def refresh_all(force_api: bool = False, use_network: bool = True):
         async def _task():
-            status_text.value = "⏳ 正在連線 Yahoo (Q1/Q2) 同步報價..." if use_network else "⏳ 計算中..."
+            status_text.value = "⏳ 同步報價中(Q1/Q2/Stooq)..." if use_network else "⏳ 計算中..."
             status_text.color = "#ecc94b"
             page.update()
             try:
@@ -882,28 +922,29 @@ async def _build(page: ft.Page):
                 update_ui_from_rows(*res)
                 any_net_ok = res[9]
                 any_fb = res[10]
+                node_lbl = res[11]
                 if use_network and sw_live.value:
                     if not any_net_ok:
-                        status_text.value = "⚠️ Yahoo 報價異常，已切換至離線預設值"
+                        status_text.value = "⚠️ 報價異常，已切換離線值"
                         status_text.color = "#fc8181"
                     elif any_fb:
-                        status_text.value = "⚠️ 部分報價異常已用離線值"
+                        status_text.value = f"⚠️ 部分離線 ({node_lbl})"
                         status_text.color = "#ecc94b"
                     else:
-                        status_text.value = f"✅ 更新 {datetime.datetime.now().strftime('%H:%M:%S')}"
+                        status_text.value = f"✅ {node_lbl} 更新 {datetime.datetime.now().strftime('%H:%M:%S')}"
                         status_text.color = "#68d391"
                 else:
                     status_text.value = f"✅ 離線重算 {datetime.datetime.now().strftime('%H:%M:%S')}"
                     status_text.color = "#68d391"
-            except Exception as ex:
-                status_text.value = "⚠️ Yahoo 報價異常，已切換至離線預設值"
+            except Exception:
+                status_text.value = "⚠️ 報價異常，已切換離線值"
                 status_text.color = "#fc8181"
             finally:
                 page.update()
 
         page.run_task(_task)
 
-    # --- 分頁 1：總覽設定 (三層凱利口徑切換 + 3子分頁) ---
+    # --- 分頁 1：總覽設定 ---
     def build_page0_subviews(live_rows, total_stock_val, total_portfolio_equity, cash_pool, daily_var_95, avg_corr):
         page0_overview_col.controls.clear()
 
@@ -928,7 +969,7 @@ async def _build(page: ft.Page):
             content=ft.Column([
                 ft.Row([
                     make_btn("🟢 半凱利 0.5x (穩健預設)", sw_kelly_m("half"), "#2563eb" if is_half else "#1e293b", expand=1, pad=5),
-                    make_btn("🔴 全凱利 1.0x (高波動警示⚠️)", sw_kelly_m("full"), "#dc2626" if not is_half else "#1e293b", expand=1, pad=5),
+                    make_btn("🔴 全凱利 1.0x (高波動⚠️)", sw_kelly_m("full"), "#dc2626" if not is_half else "#1e293b", expand=1, pad=5),
                 ], spacing=5),
                 ft.Row([
                     make_btn("🛡️ 取保守值 min(模型,手設)", sw_kelly_src("min_cap"), "#38a169" if cur_src == "min_cap" else "#1e293b", expand=1, pad=5, size=10),
@@ -968,7 +1009,7 @@ async def _build(page: ft.Page):
                 ft.Row([tf_cash, tf_tax], spacing=6),
                 ft.Row([
                     make_btn("⚡ 套用重算", lambda e: refresh_all(False, False), "#38a169", pad=7, expand=1),
-                    make_btn("🔄 聯網更新(Q1/Q2)", lambda e: refresh_all(True, True), "#2563eb", pad=7, expand=1),
+                    make_btn("🔄 聯網更新報價", lambda e: refresh_all(True, True), "#2563eb", pad=7, expand=1),
                     make_btn("↩️ 重置", reset_defaults, "#4a5568", pad=7, expand=1),
                 ], spacing=5),
             ])
@@ -1018,7 +1059,6 @@ async def _build(page: ft.Page):
                 make_table_box("系統性壓力測試三大核心輸出", stress_headers, stress_rows, "#742a2a"),
             ])
         else:
-            # 組合級輕量蒙地卡羅 (每日重抽共同因子、當日跨股共用)
             def run_portfolio_mc(trials: int):
                 async def _task():
                     status_text.value = f"⏳ 執行組合 {trials} 次 MC..."
@@ -1035,7 +1075,6 @@ async def _build(page: ft.Page):
                             peak_eq = base_eq
                             worst_dd = 0.0
                             for _day in range(n_days):
-                                # 每日獨立重抽共同市場因子，當日所有股票共用
                                 day_market_factor = random.gauss(0.0, 0.012)
                                 day_stock_val = 0.0
                                 for idx, r in enumerate(live_rows):
@@ -1105,7 +1144,7 @@ async def _build(page: ft.Page):
             ),
         ])
 
-    # --- 分頁 2：風控持倉（總表 | 權重與量尺圖 | 編輯新增，並展示三層凱利上限） ---
+    # --- 分頁 2：風控持倉 ---
     def build_page1_holdings(live_rows: list):
         page1_holdings_col.controls.clear()
 
@@ -1399,7 +1438,7 @@ async def _build(page: ft.Page):
             ),
         ])
 
-    # --- 分頁 4：既有持股加減碼（完整包含通用費氏階梯減碼表，支援全部持股） ---
+    # --- 分頁 4：既有持股加減碼 ---
     t4_ticker_tf = ft.TextField(label="持股代號", value="NBIS", expand=1, height=44, text_size=12)
     t4_shares_tf = ft.TextField(label="現有股數", value="550", expand=1, height=44, text_size=12)
     t4_cost_tf = ft.TextField(label="持有均價", value="226.215", expand=1, height=44, text_size=12)
@@ -1567,7 +1606,7 @@ async def _build(page: ft.Page):
         ])
         run_calc()
 
-    # --- 分頁 5：雙核心減碼專區 (NBIS / MRVL) ---
+    # --- 分頁 5：雙核心減碼專區 ---
     def build_page4_trim(live_rows: list):
         page4_trim_col.controls.clear()
         nbis_r = next((x for x in live_rows if x["Ticker"] == "NBIS"), None)
@@ -1601,7 +1640,7 @@ async def _build(page: ft.Page):
             ),
         ])
 
-    # --- 分頁 6：標的研究 / 預加碼 (支援三層報價備援 + 0.5->0.618->1.272->1.618 動態挑選與已延伸判斷) ---
+    # --- 分頁 6：標的研究 / 預加碼 ---
     research_ticker_tf = ft.TextField(label="研究代號 (如 NVDA/AMD/INTC)", value="NVDA", expand=1, height=44, text_size=12)
     research_budget_tf = ft.TextField(label="建倉預算 ($)", value="10000", expand=1, height=44, text_size=12)
     research_manual_k_tf = ft.TextField(label="手設半凱利上限(%)", value="15.0", expand=1, height=44, text_size=12)
@@ -1634,16 +1673,16 @@ async def _build(page: ft.Page):
                 return
 
             async def _task():
-                status_text.value = f"⏳ 正在連線 Yahoo (Q1/Q2) 抓取 {tkr}..."
+                status_text.value = f"⏳ 正在抓取 {tkr}..."
                 status_text.color = "#ecc94b"
                 page.update()
                 q = await asyncio.to_thread(fetch_quant_metrics, tkr, sw_ext.value, True)
                 if not q:
                     q = make_fallback_metrics(100.0, "離線預設")
-                    status_text.value = "⚠️ Yahoo 報價異常，已切換至離線預設值"
+                    status_text.value = "⚠️ 報價異常，已切換離線值"
                     status_text.color = "#fc8181"
                 else:
-                    status_text.value = f"✅ 已載入 {tkr} ${q['Price']:.2f} ({q['Source_Node']})"
+                    status_text.value = f"✅ {tkr} ${q['Price']:.2f} ({q['Source_Node']})"
                     status_text.color = "#68d391"
 
                 CURRENT_RESEARCH_INFO.clear()
@@ -1662,7 +1701,7 @@ async def _build(page: ft.Page):
             padding=8,
             content=ft.Column([
                 ft.Row([research_ticker_tf, research_budget_tf, research_manual_k_tf], spacing=5),
-                make_btn("🔍 聯網抓取最新報價與費氏指標 (Q1/Q2雙備援)", fetch_and_analyze, "#38a169", pad=7),
+                make_btn("🔍 聯網抓取最新報價與費氏指標 (Q1/Q2/Stooq)", fetch_and_analyze, "#38a169", pad=7),
                 sub_tab_bar,
             ], spacing=5),
         )
@@ -1687,7 +1726,6 @@ async def _build(page: ft.Page):
         ret_618 = q["Ret_0618"]
         hard_stop = round(cur_p - 2.0 * atr, 2)
 
-        # 動態挑選 0.5 -> 0.618 -> 1.272 -> 1.618 目標關卡，並識別「已延伸」狀態
         active_fib_target, active_fib_lbl, is_ext = pick_next_fib_target_info(cur_p, q)
 
         formula_full_k = compute_dynamic_kelly(cur_p, hard_stop, active_fib_target, atr, rsi, q["Trend_Diag"], is_ext)
@@ -1922,17 +1960,19 @@ async def _build(page: ft.Page):
     render_main_nav()
     page.controls.clear()
     page.add(
+        # 頂部 34px 安全距離緩衝區，避免被 Android 手機狀態列（時間、電量圖示）遮擋
+        ft.Container(height=34),
         ft.Container(
             bgcolor="#161b26",
             border_radius=8,
-            padding=6,
+            padding=8,
             content=ft.Column([
                 ft.Row([
                     ft.Text("美股量化風控", size=15, weight=ft.FontWeight.BOLD, color="#ffffff"),
                     status_text,
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 main_nav_col,
-            ], spacing=4),
+            ], spacing=5),
         ),
         page0_overview_col,
         page1_holdings_col,
@@ -1940,9 +1980,10 @@ async def _build(page: ft.Page):
         page3_calc_col,
         page4_trim_col,
         page5_research_col,
+        # 底部 24px 安全距離緩衝區，避免底部按鈕貼近手機三鍵導覽列
+        ft.Container(height=24),
     )
 
-    # 啟動時先以離線預設值秒開渲染，再於背景透過 Q1 -> Q2 -> 離線降級架構非阻塞更新報價
     init_res = compute_rows(use_network=False, force_api=False)
     update_ui_from_rows(*init_res)
     refresh_all(force_api=False, use_network=True)
