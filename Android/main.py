@@ -18,7 +18,7 @@ class _YFTicker:
                 f"{self.symbol}?interval=1d&range=1y"
             )
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 r = json.loads(resp.read().decode("utf-8"))
             res = r.get("chart", {}).get("result", [])
             if res:
@@ -88,16 +88,16 @@ def add_us_trading_days(start_date: datetime.date, trading_days: int) -> datetim
 
 def safe_border(width: float, color: str):
     try:
-        return ft.Border.all(width, color)
+        return ft.border.all(width, color)
     except Exception:
         return None
 
 
 def safe_padding(vertical: float = 0, horizontal: float = 0):
     try:
-        return ft.Padding.symmetric(vertical=vertical, horizontal=horizontal)
+        return ft.padding.symmetric(vertical=vertical, horizontal=horizontal)
     except Exception:
-        return max(vertical, horizontal)
+        return ft.padding.all(max(vertical, horizontal))
 
 
 def make_btn(text, on_click_fn, bg_color="#2563eb", text_color="#ffffff", expand=False, pad_v=10, pad_h=14, border_col=None):
@@ -815,38 +815,8 @@ async def _build(page: ft.Page):
         tab4_col,
     )
     page.update()
-    # 先讓畫面完整畫出，再抓資料，避免 Flet 1.0 單執行緒卡住下半部
-    await asyncio.sleep(0.15)
-
-    # 先用離線資料立刻填滿下半部（不打網路）
-    live_was = sw_live.value
-    sw_live.value = False
-    try:
-        refresh_all(False)
-    except Exception as e:
-        page.add(ft.Text(f"離線載入失敗: {e}", color="#fc8181", selectable=True))
-        page.update()
-
-    # 若使用者開啟「自動抓即時報價」，再背景抓 Yahoo
-    if live_was:
-        sw_live.value = True
-        page.update()
-
-        def _prefetch():
-            for item in list(portfolio_data):
-                tkr = str(item.get("Ticker", "")).strip().upper()
-                if tkr:
-                    try:
-                        fetch_quant_metrics(tkr, get_extended=sw_ext.value, force_refresh=True)
-                    except Exception:
-                        pass
-
-        try:
-            await asyncio.to_thread(_prefetch)
-            refresh_all(False)
-        except Exception as e:
-            page.add(ft.Text(f"即時報價載入失敗（仍可離線使用）: {e}", color="#f6ad55", selectable=True))
-            page.update()
+    await asyncio.sleep(0)
+    refresh_all(False)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,17 @@
+[project]
+name = "quantrisk"
+version = "1.0.0"
+description = "QuantRisk Portfolio App"
 dependencies = [
-    "flet",
+    "flet"
 ]
+
+[tool.flet]
+org = "com.quantrisk"
+product = "QuantRisk"
+company = "QuantRisk"
+copyright = "Copyright (C) 2026"
+
+[tool.flet.android]
+permission.INTERNET = true
+permission.ACCESS_NETWORK_STATE = true
