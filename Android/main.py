@@ -8,7 +8,6 @@ import urllib.request
 import flet as ft
 
 
-# 解決 Android serious_python 找不到系統 CA 憑證導致 HTTPS 永遠連線失敗的問題
 def _make_ssl_ctx():
     try:
         ctx = ssl.create_default_context()
@@ -49,7 +48,6 @@ class _YFTicker:
             "Accept": "*/*",
         }
 
-        # 第一、二層：Yahoo Q1 / Q2 (附帶免驗證 SSL_CTX 打通 Android HTTPS)
         for host, node_lbl in hosts:
             try:
                 url = (
@@ -107,7 +105,6 @@ class _YFTicker:
                 self.dates.clear()
                 continue
 
-        # 異質備援層：若 Yahoo Q1/Q2 皆被阻擋，自動改抓 Stooq 美股日線 CSV
         if not self.fetch_ok:
             try:
                 stooq_url = f"https://stooq.com/q/d/l/?s={self.symbol.lower()}.us&i=d"
@@ -146,8 +143,40 @@ yf = _YFModule()
 
 
 DEFAULT_PORTFOLIO = [
-    {"Ticker": "NBIS", "Name": "Nebius Group", "Shares": 550, "Avg_Cost": 226.215, "Target_Kelly_Pct": 15.0, "Hard_Stop": 159.00, "Key_Fib_Target": 245.00, "Is_Semi_AI": True},
-    {"Ticker": "MRVL", "Name": "Marvell Tech", "Shares": 350, "Avg_Cost": 255.965, "Target_Kelly_Pct": 15.0, "Hard_Stop": 218.00, "Key_Fib_Target": 272.50, "Is_Semi_AI": True},
+    {
+        "Ticker": "NBIS",
+        "Name": "Nebius Group",
+        "Shares": 550,
+        "Avg_Cost": 226.215,
+        "Target_Kelly_Pct": 15.0,
+        "Hard_Stop": 159.00,
+        "Key_Fib_Target": 245.00,
+        "Is_Semi_AI": True,
+        "Trim_P1": 195.80,
+        "Trim_S1": 87,
+        "Trim_P2": 200.00,
+        "Trim_S2": 80,
+        "Trim_P3": 215.50,
+        "Trim_S3": 50,
+        "Trim_Stop_S": 100,
+    },
+    {
+        "Ticker": "MRVL",
+        "Name": "Marvell Tech",
+        "Shares": 350,
+        "Avg_Cost": 255.965,
+        "Target_Kelly_Pct": 15.0,
+        "Hard_Stop": 218.00,
+        "Key_Fib_Target": 272.50,
+        "Is_Semi_AI": True,
+        "Trim_P1": 247.77,
+        "Trim_S1": 57,
+        "Trim_P2": 256.00,
+        "Trim_S2": 60,
+        "Trim_P3": 272.50,
+        "Trim_S3": 53,
+        "Trim_Stop_S": 60,
+    },
     {"Ticker": "MU", "Name": "Micron Tech", "Shares": 50, "Avg_Cost": 516.017, "Target_Kelly_Pct": 15.0, "Hard_Stop": 465.00, "Key_Fib_Target": 585.00, "Is_Semi_AI": True},
     {"Ticker": "AVGO", "Name": "Broadcom Inc", "Shares": 100, "Avg_Cost": 325.207, "Target_Kelly_Pct": 15.0, "Hard_Stop": 298.00, "Key_Fib_Target": 358.50, "Is_Semi_AI": True},
     {"Ticker": "DRAM", "Name": "Roundhill ETF", "Shares": 350, "Avg_Cost": 68.393, "Target_Kelly_Pct": 5.0, "Hard_Stop": 58.50, "Key_Fib_Target": 76.50, "Is_Semi_AI": True},
@@ -194,6 +223,18 @@ def make_btn(text: str, on_click_fn, bg_color: str = "#2563eb", text_color: str 
         width=width,
         expand=expand,
         on_click=on_click_fn,
+    )
+
+
+def make_tf(label_str: str, val_str: str, expand: int = 1, hint_str: str = None):
+    """不綁死 height，避免 Android 上浮動標籤 (Floating Label) 頂部字體被截斷"""
+    return ft.TextField(
+        label=label_str,
+        value=val_str,
+        hint_text=hint_str,
+        expand=expand,
+        text_size=12,
+        content_padding=10,
     )
 
 
@@ -287,7 +328,7 @@ def make_table_box(title: str, headers: list, rows: list, header_bg: str = "#1e3
         for h in headers
     ]
     table_rows = [
-        ft.Container(bgcolor=header_bg, padding=5, border_radius=5, content=ft.Row(header_cells, spacing=3))
+        ft.Container(bgcolor=header_bg, padding=6, border_radius=5, content=ft.Row(header_cells, spacing=4))
     ]
     for idx, r in enumerate(rows):
         row_bg = "#1a2232" if idx % 2 == 0 else "#131824"
@@ -297,9 +338,9 @@ def make_table_box(title: str, headers: list, rows: list, header_bg: str = "#1e3
         table_rows.append(
             ft.Container(
                 bgcolor=row_bg,
-                padding=5,
+                padding=6,
                 border_radius=4,
-                content=ft.Row(row_cells, spacing=3),
+                content=ft.Row(row_cells, spacing=4),
             )
         )
     return ft.Container(
@@ -309,7 +350,7 @@ def make_table_box(title: str, headers: list, rows: list, header_bg: str = "#1e3
         content=ft.Column(
             [
                 ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color="#f7fafc"),
-                ft.Column(table_rows, spacing=2),
+                ft.Column(table_rows, spacing=3),
             ],
             spacing=5,
         ),
@@ -433,26 +474,26 @@ def fetch_quant_metrics(ticker: str, get_extended: bool = True, force_refresh: b
         ext_1618 = round(swing_low + diff * 1.618, 2)
 
         if current_price >= ma20 and ma20 >= ma50:
-            trend_diag = "多頭排列 (站穩月/季線)"
+            trend_diag = "多頭排列\n(站穩月/季線)"
         elif current_price >= ma20:
-            trend_diag = "短多轉強 (站上20MA)"
+            trend_diag = "短多轉強\n(站上20MA)"
         elif current_price >= ma50:
-            trend_diag = "中期震盪 (月線下/季線上)"
+            trend_diag = "中期震盪\n(月線下/季線上)"
         else:
-            trend_diag = "空頭修正 (月/季線之下)"
+            trend_diag = "空頭修正\n(月/季線之下)"
 
         if current_price >= ext_1618:
-            fib_zone_diag = "🔥 已延伸 (>擴散 1.618)"
+            fib_zone_diag = "🔥 已延伸\n(>擴散 1.618)"
         elif current_price >= ret_236:
-            fib_zone_diag = "強勢區 (>回撤 0.236)"
+            fib_zone_diag = "強勢區\n(>回撤 0.236)"
         elif current_price >= ret_382:
-            fib_zone_diag = "淺回撤支撐 (0.236~0.382)"
+            fib_zone_diag = "淺回撤支撐\n(0.236~0.382)"
         elif current_price >= ret_500:
-            fib_zone_diag = "中度回撤區 (0.382~0.500)"
+            fib_zone_diag = "中度回撤區\n(0.382~0.500)"
         elif current_price >= ret_618:
-            fib_zone_diag = "黃金分割支撐 (0.5~0.618)"
+            fib_zone_diag = "黃金分割支撐\n(0.5~0.618)"
         else:
-            fib_zone_diag = "深度回撤超跌 (<0.618)"
+            fib_zone_diag = "深度回撤超跌\n(<0.618)"
 
         res = {
             "Price": round(current_price, 2),
@@ -528,8 +569,8 @@ def make_fallback_metrics(raw_price: float, sess_lbl: str = "離線預設"):
         "MA20": round(raw_price, 2),
         "MA50": round(raw_price * 0.98, 2),
         "MA200": round(raw_price * 0.92, 2),
-        "Trend_Diag": "離線估算模式",
-        "Fib_Zone_Diag": "黃金分割支撐",
+        "Trend_Diag": "離線估算\n(預設模式)",
+        "Fib_Zone_Diag": "黃金分割支撐\n(0.5~0.618)",
     }
 
 
@@ -573,7 +614,7 @@ async def main(page: ft.Page):
         await _build(page)
     except Exception as e:
         import traceback
-        page.add(ft.Container(height=34))
+        page.add(ft.Container(height=36))
         page.add(ft.Text(f"啟動錯誤: {e}", color="#fc8181", size=14, selectable=True))
         page.add(ft.Text(traceback.format_exc(), size=11, color="#e2e8f0", selectable=True))
         page.update()
@@ -582,8 +623,8 @@ async def main(page: ft.Page):
 async def _build(page: ft.Page):
     portfolio_data = [dict(item) for item in DEFAULT_PORTFOLIO]
     active_page_idx = [0]        # 6 大主分頁 (0~5)
-    kelly_mode = ["half"]        # "half" (半凱利 0.5x) 或 "full" (全凱利 1.0x)
-    kelly_source = ["min_cap"]   # "min_cap" (取min保守值), "dynamic" (模型凱利), "manual" (手設上限)
+    kelly_mode = ["half"]        # "half" 或 "full"
+    kelly_source = ["min_cap"]   # "min_cap", "dynamic", "manual"
     special_stress = ["none"]    # "none", "top2_atr", "semi_15"
 
     page0_sub_tab = [0]          # 分頁 1: 0=資金設定, 1=壓力測試, 2=組合MC
@@ -591,15 +632,19 @@ async def _build(page: ft.Page):
     selected_stock_idx = [0]     # 分頁 2 選中個股
     page2_fib_stock_idx = [0]    # 分頁 3 選中個股
     page3_calc_sub_tab = [0]     # 分頁 4: 0=兩批加碼保本, 1=費氏階梯減碼, 2=技術與回撤
+    page4_trim_stock_idx = [-1]  # 分頁 5 (持倉減碼專區): -1=全持倉減碼總覽, 0..N=單股減碼掛單與編輯
     page5_sub_tab = [0]          # 分頁 6: 0=技術/費氏, 1=專屬週期, 2=部位試算, 3=單股MC
     mc_drift_mode = ["trend"]    # "trend" 或 "zero"
+
+    last_live_rows = [[]]
+    last_equity_info = [314832.0, 9616.50]
 
     sw_live = ft.Switch(label="自動抓報價", value=True)
     sw_ext = ft.Switch(label="含盤前盤後", value=True)
     sw_trading_days = ft.Switch(label="美股交易日", value=True)
-    tf_anchor_date = ft.TextField(label="組合 T+0 起始日", value="2026-10-16", expand=1, height=44, text_size=12)
-    tf_cash = ft.TextField(label="美元現金池 ($)", value="9616.50", expand=1, height=46, text_size=12)
-    tf_tax = ft.TextField(label="累計抵稅虧損 ($)", value="-3461.52", expand=1, height=46, text_size=12)
+    tf_anchor_date = make_tf("組合 T+0 (YYYY-MM-DD)", "2026-10-16", expand=1, hint_str="例如 2026-10-16")
+    tf_cash = make_tf("美元現金池 ($)", "9616.50", expand=1)
+    tf_tax = make_tf("累計抵稅虧損 ($)", "-3461.52", expand=1)
     slider_shock = ft.Slider(min=-30, max=10, divisions=40, value=0, label="{value}%", expand=1)
     slider_beta = ft.Slider(min=0.5, max=3.0, divisions=25, value=1.5, label="{value}x", expand=1)
     status_text = ft.Text("✅ 就緒", size=11, color="#68d391", weight=ft.FontWeight.BOLD)
@@ -615,12 +660,13 @@ async def _build(page: ft.Page):
     kpi_grid_col = ft.Column(spacing=5)
     mc_portfolio_result_col = ft.Column(spacing=5)
 
+    # 將「🎯 雙核」改名為「🎯 減碼」，支援所有持股
     page_titles = [
         "📊 總覽",
         "🛡️ 持倉",
         "⏳ 費氏",
         "🧮 加減碼",
-        "🎯 雙核",
+        "🎯 減碼",
         "🔍 研究",
     ]
 
@@ -663,6 +709,60 @@ async def _build(page: ft.Page):
             return datetime.datetime.strptime(raw_str, "%Y-%m-%d").date()
         except Exception:
             return datetime.date(2026, 10, 16)
+
+    # --- 原生日曆選擇器 (支援組合 T+0 與標的研究專屬 T+0) ---
+    picker_target = ["portfolio"]  # "portfolio" 或 "research"
+    research_t0_tf = make_tf("專屬 T+0 錨點 (YYYY-MM-DD)", "2026-10-23", expand=1, hint_str="例如 2026-10-23")
+
+    def _on_date_picked(e):
+        try:
+            val = date_picker.value
+            if val:
+                if isinstance(val, datetime.datetime):
+                    d_str = val.date().strftime("%Y-%m-%d")
+                elif isinstance(val, datetime.date):
+                    d_str = val.strftime("%Y-%m-%d")
+                else:
+                    d_str = str(val)[:10]
+                if picker_target[0] == "portfolio":
+                    tf_anchor_date.value = d_str
+                    if last_live_rows[0]:
+                        build_page2_fib(last_live_rows[0])
+                else:
+                    research_t0_tf.value = d_str
+                    render_research_subviews(last_equity_info[0], last_equity_info[1])
+                page.update()
+        except Exception:
+            pass
+
+    date_picker = None
+    try:
+        date_picker = ft.DatePicker(
+            first_date=datetime.datetime(2024, 1, 1),
+            last_date=datetime.datetime(2028, 12, 31),
+            on_change=_on_date_picked,
+        )
+        page.overlay.append(date_picker)
+    except Exception:
+        date_picker = None
+
+    def open_calendar(target_name: str):
+        def _fn(e):
+            picker_target[0] = target_name
+            if date_picker is not None:
+                try:
+                    if hasattr(page, "open"):
+                        page.open(date_picker)
+                    else:
+                        date_picker.open = True
+                        page.update()
+                    return
+                except Exception:
+                    pass
+            status_text.value = "💡 請直接在輸入框填寫 YYYY-MM-DD"
+            status_text.color = "#ecc94b"
+            page.update()
+        return _fn
 
     def compute_rows(use_network: bool, force_api: bool):
         try:
@@ -716,6 +816,16 @@ async def _build(page: ft.Page):
             dyn_target, dyn_lbl, is_ext = pick_next_fib_target_info(raw_price, q)
             user_target = float(item.get("Key_Fib_Target", dyn_target))
 
+            # 三階減碼預設值：若有自訂則用自訂，否則自動依費氏關卡與 25% 股數產生
+            s_qtr = max(1, int(math.floor(shares * 0.25)))
+            trim_p1 = float(item.get("Trim_P1", q["Fib_0500"]))
+            trim_s1 = int(item.get("Trim_S1", s_qtr))
+            trim_p2 = float(item.get("Trim_P2", q["Fib_0618"]))
+            trim_s2 = int(item.get("Trim_S2", s_qtr))
+            trim_p3 = float(item.get("Trim_P3", q["Fib_1272"]))
+            trim_s3 = int(item.get("Trim_S3", s_qtr))
+            trim_stop_s = int(item.get("Trim_Stop_S", s_qtr))
+
             row_dict = dict(q)
             row_dict.update({
                 "Ticker": tkr,
@@ -731,6 +841,13 @@ async def _build(page: ft.Page):
                 "Is_Extended": is_ext or (raw_price >= user_target and raw_price >= q["Fib_1618"]),
                 "Hard_Stop": float(item.get("Hard_Stop", round(raw_price - 2 * q["ATR"], 2))),
                 "Manual_Half_Kelly_Pct": float(item.get("Target_Kelly_Pct", 15.0)),
+                "Trim_P1": trim_p1,
+                "Trim_S1": trim_s1,
+                "Trim_P2": trim_p2,
+                "Trim_S2": trim_s2,
+                "Trim_P3": trim_p3,
+                "Trim_S3": trim_s3,
+                "Trim_Stop_S": trim_stop_s,
             })
             raw_rows.append(row_dict)
 
@@ -866,6 +983,10 @@ async def _build(page: ft.Page):
         any_fallback_used=False,
         active_node_name="Q1",
     ):
+        last_live_rows[0] = live_rows
+        last_equity_info[0] = total_portfolio_equity
+        last_equity_info[1] = cash_pool
+
         sorted_w = sorted([r["Weight_Pct"] for r in live_rows], reverse=True)
         top2_conc = sum(sorted_w[:2]) if len(sorted_w) >= 2 else sum(sorted_w)
         weekly_var_95 = daily_var_95 * math.sqrt(5)
@@ -992,7 +1113,7 @@ async def _build(page: ft.Page):
             make_btn("🎲 組合MC", sw_page0_tab(2), "#2563eb" if page0_sub_tab[0] == 2 else "#1e293b", expand=1, pad=6),
         ], spacing=4)
 
-        sub_content = ft.Column(spacing=6)
+        sub_content = ft.Column(spacing=8)
 
         if page0_sub_tab[0] == 0:
             def reset_defaults(e):
@@ -1006,7 +1127,8 @@ async def _build(page: ft.Page):
 
             sub_content.controls.extend([
                 ft.Row([sw_live, sw_ext], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                ft.Row([tf_cash, tf_tax], spacing=6),
+                ft.Container(height=2),
+                ft.Row([tf_cash, tf_tax], spacing=8),
                 ft.Row([
                     make_btn("⚡ 套用重算", lambda e: refresh_all(False, False), "#38a169", pad=7, expand=1),
                     make_btn("🔄 聯網更新報價", lambda e: refresh_all(True, True), "#2563eb", pad=7, expand=1),
@@ -1044,7 +1166,7 @@ async def _build(page: ft.Page):
             stress_headers = ["系統壓力核心指標", "壓力後數值", "安全墊與風險診斷"]
             stress_rows = [
                 ["壓力後組合總淨值", f"${total_portfolio_equity:,.0f}", f"較基準變動 ${dd_amt:+,.0f}"],
-                ["近似最大回撤 (MDD)", f"{dd_pct:+.2f}%", "本估值為簡化近似係數"],
+                ["近似最大回撤\n(MDD)", f"{dd_pct:+.2f}%", "本估值為簡化近似係數"],
                 ["現金安全墊狀態", "安全充裕" if cash_cushion_ok else "⚠️ 跌破安全墊", f"可用現金 ${cash_pool:,.0f}"],
                 ["觸及硬停損標的", ", ".join(breached) if breached else "無 (防線完好)", "須強制減碼" if breached else "紀律續抱"],
             ]
@@ -1105,13 +1227,13 @@ async def _build(page: ft.Page):
 
                     p5, p50, p95, dd_p50, dd_p5, under_cushion = await asyncio.to_thread(_calc)
                     mc_portfolio_result_col.controls.clear()
-                    mc_headers = ["組合 21 天模擬指標", "估計數值", "實戰含義 (歷史波動近似)"]
+                    mc_headers = ["組合 21 天模擬指標", "估計數值", "實戰含義\n(歷史波動近似)"]
                     mc_rows = [
-                        ["P5 悲觀淨值 (5%分位)", f"${p5:,.0f}", f"{(p5 - total_portfolio_equity) / total_portfolio_equity * 100.0:+.1f}% 尾端風險"],
+                        ["P5 悲觀淨值\n(5%分位)", f"${p5:,.0f}", f"{(p5 - total_portfolio_equity) / total_portfolio_equity * 100.0:+.1f}% 尾端風險"],
                         ["P50 中位數淨值", f"${p50:,.0f}", f"{(p50 - total_portfolio_equity) / total_portfolio_equity * 100.0:+.1f}% 期望中樞"],
-                        ["P95 樂觀淨值 (95%分位)", f"${p95:,.0f}", f"{(p95 - total_portfolio_equity) / total_portfolio_equity * 100.0:+.1f}% 順風表現"],
+                        ["P95 樂觀淨值\n(95%分位)", f"${p95:,.0f}", f"{(p95 - total_portfolio_equity) / total_portfolio_equity * 100.0:+.1f}% 順風表現"],
                         ["近似最大回撤分位", f"中位 {dd_p50:.1f}%", f"極端 P5 回撤 {dd_p5:.1f}%"],
-                        ["跌破 85% 淨值門檻比例", f"{under_cushion:.1f}%", "回撤逾 15% 之發生比例"],
+                        ["跌破 85% 淨值門檻", f"{under_cushion:.1f}%", "回撤逾 15% 之發生比例"],
                     ]
                     mc_portfolio_result_col.controls.append(
                         make_table_box(f"組合蒙地卡羅參考 ({trials}次 | 每日重抽共同因子)", mc_headers, mc_rows, "#2c5282")
@@ -1139,8 +1261,8 @@ async def _build(page: ft.Page):
             ft.Container(
                 bgcolor="#161b26",
                 border_radius=9,
-                padding=8,
-                content=ft.Column([sub_tab_bar, sub_content], spacing=6),
+                padding=10,
+                content=ft.Column([sub_tab_bar, sub_content], spacing=8),
             ),
         ])
 
@@ -1253,18 +1375,18 @@ async def _build(page: ft.Page):
                 build_page1_holdings(live_rows)
                 page.update()
 
-            chips.append(make_btn("+ 新增", sel_add, "#dd6b20" if is_add else "#1e293b", pad=5))
+            chips.append(make_btn("+ 新增持股", sel_add, "#dd6b20" if is_add else "#1e293b", pad=5))
             page1_holdings_col.controls.append(ft.Row(chips, wrap=True, spacing=4))
 
             if not is_add and 0 <= selected_stock_idx[0] < len(live_rows):
                 idx = selected_stock_idx[0]
                 r = live_rows[idx]
-                tf_s = ft.TextField(label="股數", value=str(r["Shares"]), expand=1, height=44, text_size=12)
-                tf_c = ft.TextField(label="均價", value=str(r["Avg_Cost"]), expand=1, height=44, text_size=12)
-                tf_p = ft.TextField(label="手動/離線價($)", value=str(r["Price"]), expand=1, height=44, text_size=12)
-                tf_k = ft.TextField(label="手設半凱利%", value=str(r["Manual_Half_Kelly_Pct"]), expand=1, height=44, text_size=12)
-                tf_f = ft.TextField(label="費氏目標", value=str(r["Key_Fib_Target"]), expand=1, height=44, text_size=12)
-                tf_h = ft.TextField(label="停損價", value=str(r["Hard_Stop"]), expand=1, height=44, text_size=12)
+                tf_s = make_tf("股數", str(r["Shares"]), expand=1)
+                tf_c = make_tf("持有均價($)", str(r["Avg_Cost"]), expand=1)
+                tf_p = make_tf("手動/離線價($)", str(r["Price"]), expand=1)
+                tf_k = make_tf("手設半凱利(%)", str(r["Manual_Half_Kelly_Pct"]), expand=1)
+                tf_f = make_tf("費氏目標價($)", str(r["Key_Fib_Target"]), expand=1)
+                tf_h = make_tf("硬性停損價($)", str(r["Hard_Stop"]), expand=1)
 
                 def _save(e):
                     try:
@@ -1290,7 +1412,7 @@ async def _build(page: ft.Page):
                     ft.Container(
                         bgcolor="#161b26",
                         border_radius=8,
-                        padding=8,
+                        padding=10,
                         content=ft.Column([
                             ft.Text(
                                 f"編輯 {r['Ticker']} [{r['Session']}] | 模型半凱利 {r['Formula_Half_K']:.1f}% / 手設 {r['Manual_Half_Kelly_Pct']:.1f}%",
@@ -1298,21 +1420,22 @@ async def _build(page: ft.Page):
                                 weight=ft.FontWeight.BOLD,
                                 color="#ffffff",
                             ),
-                            ft.Row([tf_s, tf_c], spacing=6),
-                            ft.Row([tf_p, tf_k], spacing=6),
-                            ft.Row([tf_f, tf_h], spacing=6),
+                            ft.Container(height=2),
+                            ft.Row([tf_s, tf_c], spacing=8),
+                            ft.Row([tf_p, tf_k], spacing=8),
+                            ft.Row([tf_f, tf_h], spacing=8),
                             ft.Row([
-                                make_btn("💾 儲存(若離線將套用手動價)", _save, "#2563eb", pad=7, expand=1),
+                                make_btn("💾 儲存(離線時套用手動價)", _save, "#2563eb", pad=7, expand=1),
                                 make_btn("🗑️ 刪除", _del, "#9b2c2c", pad=7, expand=1),
                             ], spacing=6),
-                        ], spacing=6),
+                        ], spacing=8),
                     )
                 )
             else:
-                new_t = ft.TextField(label="代號", value="", expand=1, height=44, text_size=12)
-                new_s = ft.TextField(label="股數", value="50", expand=1, height=44, text_size=12)
-                new_c = ft.TextField(label="均價/預設價", value="100", expand=1, height=44, text_size=12)
-                new_k = ft.TextField(label="手設半凱利%", value="15", expand=1, height=44, text_size=12)
+                new_t = make_tf("股票代號", "", expand=1, hint_str="如 NVDA")
+                new_s = make_tf("持有股數", "50", expand=1)
+                new_c = make_tf("持有均價($)", "100", expand=1)
+                new_k = make_tf("手設半凱利(%)", "15", expand=1)
 
                 def _add(e):
                     nt = (new_t.value or "").strip().upper()
@@ -1337,17 +1460,18 @@ async def _build(page: ft.Page):
                     ft.Container(
                         bgcolor="#161b26",
                         border_radius=8,
-                        padding=8,
+                        padding=10,
                         content=ft.Column([
-                            ft.Text("新增美股到持倉：", size=12, weight=ft.FontWeight.BOLD, color="#63b3ed"),
-                            ft.Row([new_t, new_s], spacing=6),
-                            ft.Row([new_c, new_k], spacing=6),
-                            make_btn("➕ 加入並聯網更新", _add, "#38a169", pad=8),
-                        ], spacing=6),
+                            ft.Text("新增美股到持倉 (同時納入減碼與費氏追蹤)：", size=12, weight=ft.FontWeight.BOLD, color="#63b3ed"),
+                            ft.Container(height=2),
+                            ft.Row([new_t, new_s], spacing=8),
+                            ft.Row([new_c, new_k], spacing=8),
+                            make_btn("➕ 加入持倉並聯網更新", _add, "#38a169", pad=8),
+                        ], spacing=8),
                     )
                 )
 
-    # --- 分頁 3：費氏週期與回撤/擴散矩陣 ---
+    # --- 分頁 3：費氏週期與回撤/擴散矩陣 (括號說明全部換行，不再擁擠) ---
     def build_page2_fib(live_rows: list):
         page2_fib_col.controls.clear()
         if not live_rows:
@@ -1402,32 +1526,73 @@ async def _build(page: ft.Page):
 
         def _d(lvl):
             pct = ((lvl - cur_p) / cur_p * 100.0) if cur_p else 0
-            return f"${lvl:.2f} ({pct:+.1f}%)"
+            return f"${lvl:.2f}\n({pct:+.1f}%)"
 
-        fib_headers = ["費氏回撤 (高點回落支撐)", "支撐價位", "費氏擴散 (低點推升目標)", "目標價位"]
+        # 修正第二張圖紅框：所有括號說明強制換行到下一行，保持寬敞整齊
+        fib_headers = [
+            "費氏回撤\n(高點回落支撐)",
+            "支撐價位\n(距離現價%)",
+            "費氏擴散\n(低點推升目標)",
+            "目標價位\n(距離現價%)",
+        ]
         fib_rows = [
-            ["波段高點 (Swing High)", f"${sr['Swing_High']:.2f}", "波段低點 (Swing Low)", f"${sr['Swing_Low']:.2f}"],
-            ["回撤 0.236 (淺回檔)", _d(sr["Ret_0236"]), "反彈 0.500 (多空頸線)", _d(sr["Fib_0500"])],
-            ["回撤 0.382 (第一支撐)", _d(sr["Ret_0382"]), "反彈 0.618 (黃金分割壓)", _d(sr["Fib_0618"])],
-            ["回撤 0.500 (多空中軸)", _d(sr["Ret_0500"]), "前高 1.000 (突破基準)", _d(sr["Swing_High"])],
-            ["回撤 0.618 (黃金分割買點)", _d(sr["Ret_0618"]), "擴散 1.272 (延伸一)", _d(sr["Fib_1272"])],
-            ["回撤 0.786 (防守底線)", _d(sr["Ret_0786"]), "擴散 1.618 (延伸二)", _d(sr["Fib_1618"])],
+            [
+                "波段高點\n(Swing High)",
+                f"${sr['Swing_High']:.2f}",
+                "波段低點\n(Swing Low)",
+                f"${sr['Swing_Low']:.2f}",
+            ],
+            [
+                "回撤 0.236\n(淺回檔)",
+                _d(sr["Ret_0236"]),
+                "反彈 0.500\n(多空頸線)",
+                _d(sr["Fib_0500"]),
+            ],
+            [
+                "回撤 0.382\n(第一支撐)",
+                _d(sr["Ret_0382"]),
+                "反彈 0.618\n(黃金分割壓)",
+                _d(sr["Fib_0618"]),
+            ],
+            [
+                "回撤 0.500\n(多空中軸)",
+                _d(sr["Ret_0500"]),
+                "前高 1.000\n(突破基準)",
+                _d(sr["Swing_High"]),
+            ],
+            [
+                "回撤 0.618\n(黃金分割買點)",
+                _d(sr["Ret_0618"]),
+                "擴散 1.272\n(延伸一)",
+                _d(sr["Fib_1272"]),
+            ],
+            [
+                "回撤 0.786\n(防守底線)",
+                _d(sr["Ret_0786"]),
+                "擴散 1.618\n(延伸二)",
+                _d(sr["Fib_1618"]),
+            ],
         ]
 
         page2_fib_col.controls.extend([
             ft.Container(
                 bgcolor="#161b26",
                 border_radius=8,
-                padding=8,
+                padding=10,
                 content=ft.Column([
+                    ft.Container(height=2),
                     ft.Row([
                         tf_anchor_date,
-                        make_btn("10/16", lambda e: (setattr(tf_anchor_date, "value", "2026-10-16"), build_page2_fib(live_rows), page.update()), "#1e293b", pad=6),
-                        make_btn("今天", lambda e: (setattr(tf_anchor_date, "value", datetime.date.today().strftime("%Y-%m-%d")), build_page2_fib(live_rows), page.update()), "#1e293b", pad=6),
+                        make_btn("📅 日曆", open_calendar("portfolio"), "#2563eb", pad=7),
+                        make_btn("✅ 套用", lambda e: (build_page2_fib(live_rows), page.update()), "#38a169", pad=7),
+                    ], spacing=5),
+                    ft.Row([
+                        make_btn("10/16錨點", lambda e: (setattr(tf_anchor_date, "value", "2026-10-16"), build_page2_fib(live_rows), page.update()), "#1e293b", pad=5, expand=1),
+                        make_btn("今天", lambda e: (setattr(tf_anchor_date, "value", datetime.date.today().strftime("%Y-%m-%d")), build_page2_fib(live_rows), page.update()), "#1e293b", pad=5, expand=1),
                     ], spacing=5),
                     sw_trading_days,
                     tz_grid,
-                ], spacing=5),
+                ], spacing=6),
             ),
             ft.Row(chips, wrap=True, spacing=4),
             make_table_box(
@@ -1439,10 +1604,10 @@ async def _build(page: ft.Page):
         ])
 
     # --- 分頁 4：既有持股加減碼 ---
-    t4_ticker_tf = ft.TextField(label="持股代號", value="NBIS", expand=1, height=44, text_size=12)
-    t4_shares_tf = ft.TextField(label="現有股數", value="550", expand=1, height=44, text_size=12)
-    t4_cost_tf = ft.TextField(label="持有均價", value="226.215", expand=1, height=44, text_size=12)
-    t4_budget_tf = ft.TextField(label="加碼預算", value="9616.50", expand=1, height=44, text_size=12)
+    t4_ticker_tf = make_tf("持股代號", "NBIS", expand=1)
+    t4_shares_tf = make_tf("現有股數", "550", expand=1)
+    t4_cost_tf = make_tf("持有均價($)", "226.215", expand=1)
+    t4_budget_tf = make_tf("加碼預算($)", "9616.50", expand=1)
     t4_result_col = ft.Column(spacing=6)
 
     def build_page3_calc(live_rows: list, total_portfolio_equity: float, cash_pool: float):
@@ -1557,8 +1722,8 @@ async def _build(page: ft.Page):
                 addon_headers = ["階段", "建議買價", "加碼股數", "動用資金", "補倉後保本均價"]
                 addon_rows = [
                     ["原持倉", f"${cost:.2f}", f"{sh}股", f"${cur_invested:,.0f}", f"${cost:.2f}"],
-                    ["第一批40% (現價)", f"${buy_p1:.2f}", f"+{b1_sh}股", f"${b1_fund:,.0f}", f"${after_b1_avg:.2f}"],
-                    ["第二批60% (回撤/ATR)", f"${buy_p2:.2f}", f"+{b2_sh}股", f"${b2_fund:,.0f}", f"${final_breakeven:.2f}"],
+                    ["第一批40%\n(現價)", f"${buy_p1:.2f}", f"+{b1_sh}股", f"${b1_fund:,.0f}", f"${after_b1_avg:.2f}"],
+                    ["第二批60%\n(回撤/ATR)", f"${buy_p2:.2f}", f"+{b2_sh}股", f"${b2_fund:,.0f}", f"${final_breakeven:.2f}"],
                     ["合計總結", "-", f"共{tot_sh}股", f"${tot_add:,.0f}", f"保本 ${final_breakeven:.2f}"],
                 ]
                 t4_result_col.controls.append(make_table_box(f"{tkr} 兩批加碼與補倉保本均價表", addon_headers, addon_rows, "#22543d"))
@@ -1570,22 +1735,22 @@ async def _build(page: ft.Page):
                 s4 = max(0, tot_sh - s1 - s2 - s3)
                 p_500, p_618, p_1272, p_1618 = matched["Fib_0500"], matched["Fib_0618"], matched["Fib_1272"], matched["Fib_1618"]
                 trim_rows = [
-                    ["Fib 0.500 (中軸調節)", f"${p_500:.2f}", "25%", f"{s1}股", f"${s1 * p_500:,.0f}"],
-                    ["Fib 0.618 (黃金分割)", f"${p_618:.2f}", "25%", f"{s2}股", f"${s2 * p_618:,.0f}"],
-                    ["擴散 1.272 (波段目標一)", f"${p_1272:.2f}", "25%", f"{s3}股", f"${s3 * p_1272:,.0f}"],
-                    ["擴散 1.618 (波段目標二)", f"${p_1618:.2f}", "25%", f"{s4}股", f"${s4 * p_1618:,.0f}"],
+                    ["Fib 0.500\n(中軸調節)", f"${p_500:.2f}", "25%", f"{s1}股", f"${s1 * p_500:,.0f}"],
+                    ["Fib 0.618\n(黃金分割)", f"${p_618:.2f}", "25%", f"{s2}股", f"${s2 * p_618:,.0f}"],
+                    ["擴散 1.272\n(波段目標一)", f"${p_1272:.2f}", "25%", f"{s3}股", f"${s3 * p_1272:,.0f}"],
+                    ["擴散 1.618\n(波段目標二)", f"${p_1618:.2f}", "25%", f"{s4}股", f"${s4 * p_1618:,.0f}"],
                     ["硬性破位停損線", f"${hard_stop:.2f}", "破位", "強制風控", "跌破無條件減碼"],
                 ]
                 t4_result_col.controls.append(make_table_box(f"{tkr} 通用費波納契四階減碼表", trim_headers, trim_rows, "#1e3a8a"))
             else:
                 tech_headers = ["技術與費氏回撤指標", "數值 / 價位", "實戰量化判讀"]
                 tech_rows = [
-                    ["均線趨勢結構", f"20MA ${matched['MA20']:.2f}", f"{matched['Trend_Diag']} | 50MA ${matched['MA50']:.2f}"],
-                    ["動能與波動", f"RSI {rsi:.1f} / ATR ${atr:.2f}", f"模型半凱利 {matched['Formula_Half_K']:.1f}% | 手設 {matched['Manual_Half_Kelly_Pct']:.1f}%"],
+                    ["均線趨勢結構", f"20MA ${matched['MA20']:.2f}\n50MA ${matched['MA50']:.2f}", matched["Trend_Diag"]],
+                    ["動能與波動", f"RSI {rsi:.1f}\nATR ${atr:.2f}", f"模型半凱利 {matched['Formula_Half_K']:.1f}%\n手設 {matched['Manual_Half_Kelly_Pct']:.1f}%"],
                     ["動態下一關卡", f"${matched['Dyn_Fib_Target']:.2f}", matched["Dyn_Fib_Label"]],
-                    ["費氏回撤 0.382 支撐", f"${ret_382:.2f}", "強勢回檔第一支撐買點"],
-                    ["費氏回撤 0.500 中軸", f"${ret_500:.2f}", "波段多空分水嶺"],
-                    ["費氏回撤 0.618 支撐", f"${ret_618:.2f}", "黃金分割防守買點"],
+                    ["回撤 0.382\n(第一支撐)", f"${ret_382:.2f}", "強勢回檔第一支撐買點"],
+                    ["回撤 0.500\n(多空中軸)", f"${ret_500:.2f}", "波段多空分水嶺"],
+                    ["回撤 0.618\n(黃金分割)", f"${ret_618:.2f}", "黃金分割防守買點"],
                 ]
                 t4_result_col.controls.append(make_table_box(f"{tkr} 技術分析與費氏回撤診斷", tech_headers, tech_rows, "#2c5282"))
             page.update()
@@ -1594,78 +1759,206 @@ async def _build(page: ft.Page):
             ft.Container(
                 bgcolor="#161b26",
                 border_radius=8,
-                padding=8,
+                padding=10,
                 content=ft.Column([
                     ft.Row(chips, wrap=True, spacing=4),
-                    ft.Row([t4_ticker_tf, t4_shares_tf], spacing=6),
-                    ft.Row([t4_cost_tf, t4_budget_tf], spacing=6),
+                    ft.Container(height=2),
+                    ft.Row([t4_ticker_tf, t4_shares_tf], spacing=8),
+                    ft.Row([t4_cost_tf, t4_budget_tf], spacing=8),
                     make_btn("🧮 重新計算加減碼與通用減碼表", run_calc, "#2563eb", pad=7),
-                ], spacing=5),
+                ], spacing=6),
             ),
             t4_result_col,
         ])
         run_calc()
 
-    # --- 分頁 5：雙核心減碼專區 ---
+    # --- 分頁 5：持倉階梯減碼專區 (升級 B：開放支援所有持股 + 新增持股 + 可自訂各階減碼價與股數) ---
     def build_page4_trim(live_rows: list):
         page4_trim_col.controls.clear()
-        nbis_r = next((x for x in live_rows if x["Ticker"] == "NBIS"), None)
-        mrvl_r = next((x for x in live_rows if x["Ticker"] == "MRVL"), None)
-        nbis_p = nbis_r["Price"] if nbis_r else 171.45
-        nbis_sh = nbis_r["Shares"] if nbis_r else 550
-        mrvl_p = mrvl_r["Price"] if mrvl_r else 235.00
-        mrvl_sh = mrvl_r["Shares"] if mrvl_r else 350
-        page4_trim_col.controls.extend([
-            make_table_box(
-                f"NBIS 雙核專屬減碼掛單表 (現有 {nbis_sh} 股 | 現價 ${nbis_p:.2f})",
-                ["階段", "掛單價", "股數", "收回現金"],
-                [
-                    ["第一階", "$195.80", "87股", f"${87 * 195.80:,.0f}"],
-                    ["第二階", "$200.00", "80股", f"${80 * 200.00:,.0f}"],
-                    ["第三階", "$215.50", "50股", f"${50 * 215.50:,.0f}"],
-                    ["破位防線", "$159.00", "100股", f"${100 * 159.00:,.0f}"],
-                ],
-                "#1e3a8a",
-            ),
-            make_table_box(
-                f"MRVL 雙核專屬減碼掛單表 (現有 {mrvl_sh} 股 | 現價 ${mrvl_p:.2f})",
-                ["階段", "掛單價", "股數", "收回現金"],
-                [
-                    ["第一階", "$247.77", "57股", f"${57 * 247.77:,.0f}"],
-                    ["第二階", "$256.00", "60股", f"${60 * 256.00:,.0f}"],
-                    ["第三階", "$272.50", "53股", f"${53 * 272.50:,.0f}"],
-                    ["破位防線", "$218.00", "60股", f"${60 * 218.00:,.0f}"],
-                ],
-                "#744210",
-            ),
-        ])
+        if not live_rows:
+            return
 
-    # --- 分頁 6：標的研究 / 預加碼 ---
-    research_ticker_tf = ft.TextField(label="研究代號 (如 NVDA/AMD/INTC)", value="NVDA", expand=1, height=44, text_size=12)
-    research_budget_tf = ft.TextField(label="建倉預算 ($)", value="10000", expand=1, height=44, text_size=12)
-    research_manual_k_tf = ft.TextField(label="手設半凱利上限(%)", value="15.0", expand=1, height=44, text_size=12)
-    research_t0_tf = ft.TextField(label="專屬 T+0 錨點", value="2026-10-16", expand=1, height=44, text_size=12)
+        chips = []
+        is_all = page4_trim_stock_idx[0] == -1
+
+        def sel_all(e):
+            page4_trim_stock_idx[0] = -1
+            build_page4_trim(live_rows)
+            page.update()
+
+        chips.append(make_btn("📋 全部持倉總覽", sel_all, "#2563eb" if is_all else "#1e293b", pad=5))
+
+        for idx, r in enumerate(live_rows):
+            is_sel = page4_trim_stock_idx[0] == idx
+
+            def make_sel_t(i):
+                def _fn(e):
+                    page4_trim_stock_idx[0] = i
+                    build_page4_trim(live_rows)
+                    page.update()
+                return _fn
+
+            chips.append(make_btn(r["Ticker"], make_sel_t(idx), "#2563eb" if is_sel else "#1e293b", pad=5))
+
+        def goto_add_stock(e):
+            active_page_idx[0] = 1
+            page1_sub_mode[0] = 2
+            selected_stock_idx[0] = len(live_rows)
+            page0_overview_col.visible = False
+            page1_holdings_col.visible = True
+            page2_fib_col.visible = False
+            page3_calc_col.visible = False
+            page4_trim_col.visible = False
+            page5_research_col.visible = False
+            render_main_nav()
+            build_page1_holdings(live_rows)
+            page.update()
+
+        chips.append(make_btn("+ 新增持股", goto_add_stock, "#dd6b20", pad=5))
+
+        page4_trim_col.controls.append(
+            ft.Container(
+                bgcolor="#161b26",
+                border_radius=8,
+                padding=8,
+                content=ft.Column([
+                    ft.Text("🎯 持倉階梯減碼掛單專區 (點選個股可自訂掛單價與股數)：", size=11, weight=ft.FontWeight.BOLD, color="#90cdf4"),
+                    ft.Row(chips, wrap=True, spacing=4),
+                ], spacing=5),
+            )
+        )
+
+        def make_stock_trim_box(r: dict, idx_in_p: int):
+            p1, s1 = r["Trim_P1"], r["Trim_S1"]
+            p2, s2 = r["Trim_P2"], r["Trim_S2"]
+            p3, s3 = r["Trim_P3"], r["Trim_S3"]
+            stop_p, stop_s = r["Hard_Stop"], r["Trim_Stop_S"]
+            tot_trim_sh = s1 + s2 + s3
+            tot_cash = s1 * p1 + s2 * p2 + s3 * p3
+            rem_sh = max(0, r["Shares"] - tot_trim_sh)
+            return make_table_box(
+                f"{r['Ticker']} 三階減碼掛單表 (現有 {r['Shares']}股 | 現價 ${r['Price']:.2f} | 減碼後留 {rem_sh}股)",
+                ["階段", "掛單價", "減碼股數", "預計收回現金"],
+                [
+                    ["第一階\n(初步鎖利)", f"${p1:.2f}", f"{s1}股", f"${s1 * p1:,.0f}"],
+                    ["第二階\n(波段調節)", f"${p2:.2f}", f"{s2}股", f"${s2 * p2:,.0f}"],
+                    ["第三階\n(主升段目標)", f"${p3:.2f}", f"{s3}股", f"${s3 * p3:,.0f}"],
+                    ["三階合計回收", "-", f"共 {tot_trim_sh}股", f"${tot_cash:,.0f}"],
+                    ["破位防線\n(硬性停損)", f"${stop_p:.2f}", f"{stop_s}股", f"${stop_s * stop_p:,.0f}"],
+                ],
+                "#1e3a8a" if idx_in_p % 2 == 0 else "#744210",
+            )
+
+        if is_all:
+            for idx, r in enumerate(live_rows):
+                page4_trim_col.controls.append(make_stock_trim_box(r, idx))
+        else:
+            if page4_trim_stock_idx[0] >= len(live_rows):
+                page4_trim_stock_idx[0] = 0
+            idx = page4_trim_stock_idx[0]
+            r = live_rows[idx]
+            page4_trim_col.controls.append(make_stock_trim_box(r, idx))
+
+            # 單股自訂三階減碼掛單價與股數編輯器
+            tf_p1 = make_tf("第一階掛單價($)", str(r["Trim_P1"]), expand=1)
+            tf_s1 = make_tf("第一階股數", str(r["Trim_S1"]), expand=1)
+            tf_p2 = make_tf("第二階掛單價($)", str(r["Trim_P2"]), expand=1)
+            tf_s2 = make_tf("第二階股數", str(r["Trim_S2"]), expand=1)
+            tf_p3 = make_tf("第三階掛單價($)", str(r["Trim_P3"]), expand=1)
+            tf_s3 = make_tf("第三階股數", str(r["Trim_S3"]), expand=1)
+            tf_stp_p = make_tf("破位防線價($)", str(r["Hard_Stop"]), expand=1)
+            tf_stp_s = make_tf("破位減碼股數", str(r["Trim_Stop_S"]), expand=1)
+
+            def save_custom_trim(e):
+                try:
+                    portfolio_data[idx]["Trim_P1"] = float(tf_p1.value)
+                    portfolio_data[idx]["Trim_S1"] = int(float(tf_s1.value))
+                    portfolio_data[idx]["Trim_P2"] = float(tf_p2.value)
+                    portfolio_data[idx]["Trim_S2"] = int(float(tf_s2.value))
+                    portfolio_data[idx]["Trim_P3"] = float(tf_p3.value)
+                    portfolio_data[idx]["Trim_S3"] = int(float(tf_s3.value))
+                    portfolio_data[idx]["Hard_Stop"] = float(tf_stp_p.value)
+                    portfolio_data[idx]["Trim_Stop_S"] = int(float(tf_stp_s.value))
+                except Exception:
+                    pass
+                refresh_all(force_api=False, use_network=False)
+
+            def auto_fib_trim(e):
+                qtr = max(1, int(math.floor(r["Shares"] * 0.25)))
+                portfolio_data[idx]["Trim_P1"] = r["Fib_0500"]
+                portfolio_data[idx]["Trim_S1"] = qtr
+                portfolio_data[idx]["Trim_P2"] = r["Fib_0618"]
+                portfolio_data[idx]["Trim_S2"] = qtr
+                portfolio_data[idx]["Trim_P3"] = r["Fib_1272"]
+                portfolio_data[idx]["Trim_S3"] = qtr
+                portfolio_data[idx]["Trim_Stop_S"] = qtr
+                refresh_all(force_api=False, use_network=False)
+
+            page4_trim_col.controls.append(
+                ft.Container(
+                    bgcolor="#161b26",
+                    border_radius=8,
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text(f"✏️ 自訂 {r['Ticker']} 階梯減碼掛單價與股數：", size=12, weight=ft.FontWeight.BOLD, color="#63b3ed"),
+                        ft.Container(height=2),
+                        ft.Row([tf_p1, tf_s1], spacing=8),
+                        ft.Row([tf_p2, tf_s2], spacing=8),
+                        ft.Row([tf_p3, tf_s3], spacing=8),
+                        ft.Row([tf_stp_p, tf_stp_s], spacing=8),
+                        ft.Row([
+                            make_btn("💾 儲存自訂掛單", save_custom_trim, "#2563eb", pad=7, expand=1),
+                            make_btn("📐 自動套用費氏階梯價", auto_fib_trim, "#38a169", pad=7, expand=1),
+                        ], spacing=6),
+                    ], spacing=8),
+                )
+            )
+
+    # --- 分頁 6：標的研究 / 預加碼 (修復第一張圖標籤被切 + 修復第三張圖子分頁切換高亮卡頓與日曆選擇) ---
+    research_ticker_tf = make_tf("研究代號", "NVDA", expand=1, hint_str="如 NVDA/AMD/INTC")
+    research_budget_tf = make_tf("建倉預算($)", "10000", expand=1)
+    research_manual_k_tf = make_tf("手設半凱利(%)", "15.0", expand=1)
+    research_sub_tab_row = ft.Row(spacing=4)
     research_result_col = ft.Column(spacing=6)
     research_mc_result_col = ft.Column(spacing=6)
 
     CURRENT_RESEARCH_INFO = {}
 
+    def render_research_sub_tab_btns(total_portfolio_equity: float, cash_pool: float):
+        """動態重繪第6頁的4顆子分頁按鈕，確保點選後立即切換藍色高亮，不卡在第一顆"""
+        research_sub_tab_row.controls.clear()
+        tab_specs = [
+            (0, "📈 技術/費氏"),
+            (1, "⏳ 專屬週期"),
+            (2, "🧮 部位試算"),
+            (3, "🎲 單股MC"),
+        ]
+        for idx, lbl in tab_specs:
+            is_act = page5_sub_tab[0] == idx
+
+            def make_sw(i):
+                def _fn(e):
+                    page5_sub_tab[0] = i
+                    render_research_sub_tab_btns(total_portfolio_equity, cash_pool)
+                    render_research_subviews(total_portfolio_equity, cash_pool)
+                    page.update()
+                return _fn
+
+            research_sub_tab_row.controls.append(
+                make_btn(
+                    lbl,
+                    make_sw(idx),
+                    bg_color="#2563eb" if is_act else "#1e293b",
+                    text_color="#ffffff" if is_act else "#a0aec0",
+                    expand=1,
+                    pad=7,
+                    size=11,
+                )
+            )
+
     def build_page5_research(total_portfolio_equity: float, cash_pool: float):
         page5_research_col.controls.clear()
-
-        def sw_res_tab(idx):
-            def _fn(e):
-                page5_sub_tab[0] = idx
-                render_research_subviews(total_portfolio_equity, cash_pool)
-                page.update()
-            return _fn
-
-        sub_tab_bar = ft.Row([
-            make_btn("📈 技術/費氏", sw_res_tab(0), "#2563eb" if page5_sub_tab[0] == 0 else "#1e293b", expand=1, pad=6),
-            make_btn("⏳ 專屬週期", sw_res_tab(1), "#2563eb" if page5_sub_tab[0] == 1 else "#1e293b", expand=1, pad=6),
-            make_btn("🧮 部位試算", sw_res_tab(2), "#2563eb" if page5_sub_tab[0] == 2 else "#1e293b", expand=1, pad=6),
-            make_btn("🎲 單股MC", sw_res_tab(3), "#2563eb" if page5_sub_tab[0] == 3 else "#1e293b", expand=1, pad=6),
-        ], spacing=4)
+        render_research_sub_tab_btns(total_portfolio_equity, cash_pool)
 
         def fetch_and_analyze(e=None):
             tkr = (research_ticker_tf.value or "").strip().upper()
@@ -1690,20 +1983,23 @@ async def _build(page: ft.Page):
                 CURRENT_RESEARCH_INFO["Ticker"] = tkr
 
                 research_t0_tf.value = q.get("Suggested_Low_Date") or datetime.date.today().strftime("%Y-%m-%d")
+                render_research_sub_tab_btns(total_portfolio_equity, cash_pool)
                 render_research_subviews(total_portfolio_equity, cash_pool)
                 page.update()
 
             page.run_task(_task)
 
+        # 修正第一張圖紅框：增加頂部留白、分排寬敞配置、不綁死 height，字體完全不遮擋
         top_ctrl = ft.Container(
             bgcolor="#161b26",
             border_radius=8,
-            padding=8,
+            padding=10,
             content=ft.Column([
-                ft.Row([research_ticker_tf, research_budget_tf, research_manual_k_tf], spacing=5),
-                make_btn("🔍 聯網抓取最新報價與費氏指標 (Q1/Q2/Stooq)", fetch_and_analyze, "#38a169", pad=7),
-                sub_tab_bar,
-            ], spacing=5),
+                ft.Container(height=2),
+                ft.Row([research_ticker_tf, research_budget_tf, research_manual_k_tf], spacing=6),
+                make_btn("🔍 聯網抓取最新報價與費氏指標 (Q1/Q2/Stooq)", fetch_and_analyze, "#38a169", pad=8),
+                research_sub_tab_row,
+            ], spacing=8),
         )
 
         page5_research_col.controls.extend([top_ctrl, research_result_col])
@@ -1763,13 +2059,13 @@ async def _build(page: ft.Page):
         if page5_sub_tab[0] == 0:
             tech_headers = ["技術與費氏維度", "價位 / 數值", "實戰量化判讀"]
             tech_rows = [
-                ["均線趨勢結構", f"20MA ${ma20:.2f} / 50MA ${q['MA50']:.2f}", f"{q['Trend_Diag']} (200MA ${q['MA200']:.2f})"],
-                ["近半年波段高低", f"高 ${q['Swing_High']:.2f} / 低 ${q['Swing_Low']:.2f}", q["Fib_Zone_Diag"]],
-                ["回撤 0.382 支撐", f"${ret_382:.2f}", "多頭回檔第一批低接支撐"],
-                ["回撤 0.500 中軸", f"${q['Ret_0500']:.2f}", "波段多空分水嶺"],
-                ["回撤 0.618 支撐", f"${ret_618:.2f}", "黃金分割強支撐買點"],
-                ["動態目標關卡", f"${active_fib_target:.2f} ({active_fib_lbl})", "已突破全關卡改採減碼" if is_ext else f"擴散 1.272: ${q['Fib_1272']:.2f} / 1.618: ${q['Fib_1618']:.2f}"],
-                ["硬性停損防線", f"${hard_stop:.2f} (-2xATR)", "跌破無條件停損出場"],
+                ["均線趨勢結構", f"20MA ${ma20:.2f}\n50MA ${q['MA50']:.2f}", f"{q['Trend_Diag']}\n(200MA ${q['MA200']:.2f})"],
+                ["近半年波段高低", f"高 ${q['Swing_High']:.2f}\n低 ${q['Swing_Low']:.2f}", q["Fib_Zone_Diag"]],
+                ["回撤 0.382\n(第一支撐)", f"${ret_382:.2f}", "多頭回檔第一批低接支撐"],
+                ["回撤 0.500\n(多空中軸)", f"${q['Ret_0500']:.2f}", "波段多空分水嶺"],
+                ["回撤 0.618\n(黃金分割)", f"${ret_618:.2f}", "黃金分割強支撐買點"],
+                ["動態目標關卡", f"${active_fib_target:.2f}\n({active_fib_lbl})", "已突破全關卡改採減碼" if is_ext else f"擴散 1.272: ${q['Fib_1272']:.2f}\n擴散 1.618: ${q['Fib_1618']:.2f}"],
+                ["硬性停損防線", f"${hard_stop:.2f}\n(-2xATR)", "跌破無條件停損出場"],
             ]
             research_result_col.controls.extend([
                 make_ladder_ruler(cur_p, hard_stop, active_fib_target, is_ext),
@@ -1810,12 +2106,24 @@ async def _build(page: ft.Page):
                 )
 
             research_result_col.controls.extend([
-                ft.Row([research_t0_tf], spacing=6),
-                ft.Row([
-                    make_btn(f"低點日({q.get('Suggested_Low_Date')})", set_t0(q.get("Suggested_Low_Date")), "#1e293b", pad=5, expand=1),
-                    make_btn(f"高點日({q.get('Suggested_High_Date')})", set_t0(q.get("Suggested_High_Date")), "#1e293b", pad=5, expand=1),
-                    make_btn("今天", set_t0(today_dt.strftime("%Y-%m-%d")), "#1e293b", pad=5, expand=1),
-                ], spacing=4),
+                ft.Container(
+                    bgcolor="#161b26",
+                    border_radius=8,
+                    padding=8,
+                    content=ft.Column([
+                        ft.Text("📅 點選「日曆」選擇起始日，或手動輸入 YYYY-MM-DD 後按套用：", size=10, color="#a0aec0"),
+                        ft.Row([
+                            research_t0_tf,
+                            make_btn("📅 日曆", open_calendar("research"), "#2563eb", pad=7),
+                            make_btn("✅ 套用", lambda e: (render_research_subviews(total_portfolio_equity, cash_pool), page.update()), "#38a169", pad=7),
+                        ], spacing=5),
+                        ft.Row([
+                            make_btn(f"低點日\n({q.get('Suggested_Low_Date')})", set_t0(q.get("Suggested_Low_Date")), "#1e293b", pad=5, expand=1),
+                            make_btn(f"高點日\n({q.get('Suggested_High_Date')})", set_t0(q.get("Suggested_High_Date")), "#1e293b", pad=5, expand=1),
+                            make_btn("今天\n(" + today_dt.strftime("%Y-%m-%d") + ")", set_t0(today_dt.strftime("%Y-%m-%d")), "#1e293b", pad=5, expand=1),
+                        ], spacing=4),
+                    ], spacing=6),
+                ),
                 ft.Column(make_grid_rows(t0_cards, cols=2, spacing=5), spacing=5),
             ])
         elif page5_sub_tab[0] == 2:
@@ -1840,16 +2148,25 @@ async def _build(page: ft.Page):
             breakeven = round(tot_fund / tot_sh, 2) if tot_sh > 0 else cur_p
 
             def add_to_portfolio(e):
+                sh_to_add = max(tot_sh, 10)
+                qtr = max(1, int(math.floor(sh_to_add * 0.25)))
                 portfolio_data.append({
                     "Ticker": tkr,
                     "Name": tkr,
-                    "Shares": max(tot_sh, 10),
+                    "Shares": sh_to_add,
                     "Avg_Cost": breakeven,
                     "Manual_Price": cur_p,
                     "Target_Kelly_Pct": manual_half_k,
                     "Hard_Stop": hard_stop,
                     "Key_Fib_Target": active_fib_target if not is_ext else round(cur_p * 1.10, 2),
                     "Is_Semi_AI": True,
+                    "Trim_P1": q["Fib_0500"],
+                    "Trim_S1": qtr,
+                    "Trim_P2": q["Fib_0618"],
+                    "Trim_S2": qtr,
+                    "Trim_P3": q["Fib_1272"],
+                    "Trim_S3": qtr,
+                    "Trim_Stop_S": qtr,
                 })
                 active_page_idx[0] = 1
                 page1_sub_mode[0] = 0
@@ -1859,8 +2176,8 @@ async def _build(page: ft.Page):
             plan_headers = ["階段", "建議買價", "股數", "動用資金", "建倉後保本均價"]
             plan_rows = [
                 ["生效凱利上限", f"現價 ${cur_p:.2f}", f"半:{half_max_sh}股", f"全:{full_max_sh}股", active_fib_lbl],
-                ["第一批40% (現價)", f"${buy_p1:.2f}", f"{b1_sh}股", f"${b1_fund:,.0f}", f"${buy_p1:.2f}"],
-                ["第二批60% (支撐)", f"${buy_p2:.2f}", f"{b2_sh}股", f"${b2_fund:,.0f}", f"${breakeven:.2f}"],
+                ["第一批40%\n(現價)", f"${buy_p1:.2f}", f"{b1_sh}股", f"${b1_fund:,.0f}", f"${buy_p1:.2f}"],
+                ["第二批60%\n(支撐)", f"${buy_p2:.2f}", f"{b2_sh}股", f"${b2_fund:,.0f}", f"${breakeven:.2f}"],
                 ["兩批建倉總結", "-", f"共 {tot_sh} 股", f"${tot_fund:,.0f}", f"保本 ${breakeven:.2f}"],
             ]
 
@@ -1871,7 +2188,7 @@ async def _build(page: ft.Page):
                     plan_rows,
                     "#22543d",
                 ),
-                make_btn(f"➕ 一鍵將 {tkr} 加入持倉追蹤主表", add_to_portfolio, "#38a169", pad=8),
+                make_btn(f"➕ 一鍵將 {tkr} 加入持倉與減碼追蹤", add_to_portfolio, "#38a169", pad=8),
             ])
         else:
             def set_drift(m):
@@ -1929,13 +2246,13 @@ async def _build(page: ft.Page):
 
                     win_prob, loss_prob, p5, p50, p95, mc_target = await asyncio.to_thread(_calc)
                     research_mc_result_col.controls.clear()
-                    mc_headers = ["21天歷史波動機率參考", "模擬估計值", "相對現價 / 條件說明"]
+                    mc_headers = ["21天波動機率參考", "模擬估計值", "相對現價 / 條件說明"]
                     mc_rows = [
                         ["觸及目標關卡機率", f"{win_prob:.1f}%", f"期間曾觸及 ${mc_target:.2f}"],
                         ["觸及硬性停損機率", f"{loss_prob:.1f}%", f"期間曾跌破停損 ${hard_stop:.2f}"],
-                        ["期末中位價 (P50)", f"${p50:.2f}", f"預期中位變動 {(p50 - cur_p) / cur_p * 100.0:+.1f}%"],
-                        ["悲觀分位價 (P5)", f"${p5:.2f}", f"下檔尾端風險 {(p5 - cur_p) / cur_p * 100.0:+.1f}%"],
-                        ["樂觀分位價 (P95)", f"${p95:.2f}", f"上檔潛在空間 {(p95 - cur_p) / cur_p * 100.0:+.1f}%"],
+                        ["期末中位價\n(P50)", f"${p50:.2f}", f"預期中位變動 {(p50 - cur_p) / cur_p * 100.0:+.1f}%"],
+                        ["悲觀分位價\n(P5)", f"${p5:.2f}", f"下檔尾端風險 {(p5 - cur_p) / cur_p * 100.0:+.1f}%"],
+                        ["樂觀分位價\n(P95)", f"${p95:.2f}", f"上檔潛在空間 {(p95 - cur_p) / cur_p * 100.0:+.1f}%"],
                     ]
                     research_mc_result_col.controls.append(
                         make_table_box(f"{tkr} 單股蒙地卡羅參考 ({trials}次)", mc_headers, mc_rows, "#2c5282")
@@ -1960,8 +2277,7 @@ async def _build(page: ft.Page):
     render_main_nav()
     page.controls.clear()
     page.add(
-        # 頂部 34px 安全距離緩衝區，避免被 Android 手機狀態列（時間、電量圖示）遮擋
-        ft.Container(height=34),
+        ft.Container(height=36),
         ft.Container(
             bgcolor="#161b26",
             border_radius=8,
@@ -1980,8 +2296,7 @@ async def _build(page: ft.Page):
         page3_calc_col,
         page4_trim_col,
         page5_research_col,
-        # 底部 24px 安全距離緩衝區，避免底部按鈕貼近手機三鍵導覽列
-        ft.Container(height=24),
+        ft.Container(height=28),
     )
 
     init_res = compute_rows(use_network=False, force_api=False)
