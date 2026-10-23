@@ -3,12 +3,12 @@ name = "quantrisk"
 version = "1.0.0"
 description = "QuantRisk Portfolio App"
 dependencies = [
-    "flet"
+  "flet"
 ]
 
 [tool.flet]
 org = "com.quantrisk"
-product = "QuantRisk"
+product = "美股量化風控"
 company = "QuantRisk"
 copyright = "Copyright (C) 2026"
 
